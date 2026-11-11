@@ -194,7 +194,7 @@ input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(-
 .tourbtn2 + nav { margin-left: 0; }
 #who { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .people { display: flex; flex-wrap: wrap; gap: 6px; }
-#view-portfel.locked .card:not(#people) { display: none; }
+#view-portfel.locked .card:not(#people):not(#link-card) { display: none; }
 .chip.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
 .chip:disabled { opacity: .4; cursor: default; }
 .welcome { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
@@ -306,6 +306,7 @@ input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(-
 
     <section class="view" id="view-portfel" hidden>
       <div style="display:grid;gap:16px">
+        <div class="card" id="link-card" hidden></div>
         <div class="card" id="people"></div>
         <div class="card">
           <div class="dhead" style="margin-bottom:12px"><h2 data-tip="h-todo">Do zrobienia</h2><span class="store" id="store-note" data-tip="store"></span></div>
@@ -350,6 +351,7 @@ input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(-
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
             <button class="chip" type="button" id="pf-export" data-tip="io-export">Pokaż mój portfel jako tekst</button>
             <button class="chip primary" type="button" id="pf-import" data-tip="io-import">Wczytaj portfel z tekstu</button>
+            <button class="chip" type="button" id="pf-link" data-tip="io-link">Skopiuj link z portfelem</button>
           </div>
           <p class="note" id="pf-io-msg" role="status"></p>
         </div>
@@ -688,6 +690,28 @@ function cleanState(d) {
   if (d.params && typeof d.params === "object") { out.params = {}; for (var k in E.DEFAULTS) out.params[k] = typeof d.params[k] === typeof E.DEFAULTS[k] ? d.params[k] : E.DEFAULTS[k]; }
   return out;
 }
+/* ---------- portfel jako tekst: wspólny parser dla pola tekstowego i linku ---------- */
+function pnum(t) { return +String(t).replace(/\s/g, "").replace(",", "."); }
+function parsePortfolioText(text) {
+  var lines = String(text).split(/\r?\n/).slice(0, 400), pos = [], cash = null, fx = null, name = "", err = "", today = new Date().toISOString().slice(0, 10);
+  lines.forEach(function (ln, k) {
+    if (err || !ln.trim()) return;
+    var f = ln.split(/[;\t]/).map(function (x) { return x.trim(); }), key = f[0].toUpperCase();
+    if (key === "OSOBA") { name = (f[1] || "").slice(0, 30); return; }
+    if (key === "KURS") { var r = pnum(f[1]); if (!(r > 0 && r < 100)) err = "Wiersz " + (k + 1) + ": podaj kurs dolara w złotych."; else fx = r; return; }
+    if (key === "GOTOWKA" || key === "GOTÓWKA" || key === "CASH") { var c = pnum(f[1]); if (!(c >= 0)) err = "Wiersz " + (k + 1) + ": podaj kwotę gotówki."; else cash = c; return; }
+    var px = pnum(f[2]), qty = pnum(f[3]);
+    if (f.length < 4) err = "Wiersz " + (k + 1) + ": potrzebne są cztery pola rozdzielone średnikami.";
+    else if (!/^[A-Z0-9.\-]{1,12}$/.test(key)) err = "Wiersz " + (k + 1) + ": nieprawidłowy symbol spółki.";
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(f[1]) || f[1] > today) err = "Wiersz " + (k + 1) + ": data musi mieć postać RRRR-MM-DD i nie może być z przyszłości.";
+    else if (!(px > 0) || !(qty > 0)) err = "Wiersz " + (k + 1) + ": cena i liczba akcji muszą być większe od zera.";
+    else if (pos.length >= 200) err = "Portfel może mieć najwyżej 200 pozycji.";
+    else pos.push({ id: newId(), s: key, date: f[1], px: px, qty: qty });
+  });
+  if (!err && !pos.length && cash === null) err = "Pole jest puste. Wklej tekst portfela.";
+  return { err: err, pos: pos, cash: cash, fx: fx, name: name };
+}
+function portfolioText() { return ST.positions.map(function (p) { return [p.s, p.date, p.px, p.qty].join("; "); }).concat(["GOTOWKA; " + (ST.cash || 0), "KURS; " + ST.fx]).join("\n"); }
 /* ---------- Osoby: osobne portfele i ustawienia w tej przeglądarce, hasło opcjonalne ---------- */
 var PF = { index: [], active: null, key: null, saving: false, dirty: false, timer: 0, quiet: false, ui: {} };
 var subtle = (window.crypto && window.crypto.subtle) || null;
@@ -775,11 +799,47 @@ function renderPeople() {
   if (a && u.del) h += '<div class="alert" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1 1 220px">Usunąć osobę ' + esc(a.name) + " razem z jej portfelem? Tego nie da się cofnąć.</span><button class=\"chip\" type=\"button\" data-pp=\"delyes\">Tak, usuń</button><button class=\"chip\" type=\"button\" data-pp=\"cancel\">Anuluj</button></div>";
   h += '<form class="pf-form" id="pp-add" novalidate style="margin-top:16px;max-width:640px"><label for="pp-new" data-tip="pp-new">Nowa osoba<input type="text" id="pp-new" maxlength="30" autocomplete="off"></label><label for="pp-newpw" data-tip="pp-newpw">Hasło (opcjonalnie)<input type="password" id="pp-newpw" autocomplete="new-password"></label><button class="chip primary" type="submit">Dodaj osobę</button></form>';
   h += '<p class="note" id="pp-msg" role="status">' + esc(u.msg || "") + "</p>";
-  h += '<p class="note">Każda osoba ma własny portfel i własne ustawienia strategii. Dane są zapisane tylko w tej przeglądarce: na innym telefonie lub komputerze trzeba dodać osobę od nowa i wczytać portfel z tekstu. Hasło szyfruje portfel, więc bez niego nie da się go odczytać. Zapomnianego hasła nie można odzyskać.</p>';
+  h += '<p class="note">Każda osoba ma własny portfel i własne ustawienia strategii. Dane są zapisane tylko w tej przeglądarce: na inny telefon lub komputer przeniesiesz portfel linkiem albo tekstem (karta „Przenieś portfel jako tekst”). Hasło szyfruje portfel, więc bez niego nie da się go odczytać. Zapomnianego hasła nie można odzyskać.</p>';
   $("people").innerHTML = h;
   $("view-portfel").classList.toggle("locked", !a);
   var who = $("who"); who.textContent = a ? a.name : "Wybierz osobę"; who.setAttribute("aria-label", a ? "Otwarty portfel: " + a.name : "Wybierz osobę");
   setMode();
+}
+/* ---------- link z portfelem: adres#wczytaj=<tekst portfela w base64url>; nic nie trafia na serwer ---------- */
+var LINK = null;
+function b64u(txt) { return b64(new TextEncoder().encode(txt)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+function unb64u(s) { s = s.replace(/-/g, "+").replace(/_/g, "/"); while (s.length % 4) s += "="; return new TextDecoder().decode(unb64(s)); }
+function checkLink() {
+  var m = /^#wczytaj=(.*)$/.exec(location.hash); if (!m) return;
+  var r; try { if (!/^[A-Za-z0-9_\-]{1,40000}$/.test(m[1])) throw 0; r = parsePortfolioText(unb64u(m[1])); } catch (e) { r = { err: "Link jest niepełny albo uszkodzony." }; }
+  try { history.replaceState(null, "", location.pathname + location.search + "#portfel"); } catch (e) {}
+  LINK = r; renderLink();
+}
+function renderLink() {
+  var el = $("link-card"), r = LINK; el.hidden = !r; if (!r) { el.innerHTML = ""; return; }
+  var h = '<h2>Portfel z linku</h2>';
+  if (r.err) h += '<p class="alert" style="margin:0 0 10px">Nie udało się wczytać portfela z linku. ' + esc(r.err) + '</p><div class="people"><button class="chip" type="button" data-link="no">Zamknij</button></div>';
+  else h += '<p style="margin:0 0 10px">Link zawiera portfel' + (r.name ? " osoby <b>" + esc(r.name) + "</b>" : "") + ": " + r.pos.length + " " + (r.pos.length === 1 ? "pozycja" : "pozycji") + (r.cash !== null ? ", gotówka " + r.cash + " $" : "") + '. Dodać go w tej przeglądarce jako osobny portfel?</p><div class="people"><button class="chip primary" type="button" data-link="yes">Dodaj portfel</button><button class="chip" type="button" data-link="no">Odrzuć</button></div>';
+  el.innerHTML = h;
+}
+function acceptLink() {
+  var r = LINK; if (!r || r.err) return;
+  var base = (r.name || "").trim().slice(0, 26) || "Portfel z linku", name = base, k = 2, entry = null;
+  var same = PF.index.filter(function (p) { return p.name.toLowerCase() === base.toLowerCase(); })[0];
+  if (same && !same.salt) {   // pusta osoba o tej samej nazwie bez hasła: wypełniamy ją, zamiast tworzyć drugą
+    var rec = null; try { rec = JSON.parse(lsGet("ag-osoba-" + same.id) || "null"); } catch (e) {}
+    var empty = PF.active && PF.active.id === same.id ? !ST.positions.length : !(rec && rec.data && Array.isArray(rec.data.positions) && rec.data.positions.length);
+    if (empty) entry = same;
+  }
+  clearTimeout(PF.timer); saveProfile();
+  if (!entry) { while (PF.index.some(function (p) { return p.name.toLowerCase() === name.toLowerCase(); })) name = base + " " + k++; entry = { id: newId(), name: name, salt: null }; }
+  var isNew = PF.index.indexOf(entry) < 0, data = { params: Object.assign({}, E.DEFAULTS), positions: r.pos, cash: r.cash || 0, fx: r.fx || ST.fx || 3.91 };
+  if (PF.active && PF.active.id === entry.id) { PF.active = null; PF.key = null; }
+  writeProfile(entry, null, data).then(function () {
+    if (isNew) { PF.index.push(entry); saveIndex(); }
+    LINK = null; renderLink(); PF.ui = {};
+    return openProfile(entry);
+  }).then(function () { peopleMsg("Dodano portfel „" + entry.name + "” z linku. Hasło ustawisz przyciskiem „Zmień nazwę lub hasło”."); });
 }
 function peopleMsg(m) { PF.ui.msg = m === true ? "" : m; renderPeople(); }
 function initPeople() {
@@ -964,27 +1024,20 @@ function initPortfolio() {
   $("pf-cancel").addEventListener("click", endEdit);
   function num(t) { return +String(t).replace(/\s/g, "").replace(",", "."); }
   $("pf-export").addEventListener("click", function () {
-    var txt = ST.positions.map(function (p) { return [p.s, p.date, p.px, p.qty].join("; "); }).concat(["GOTOWKA; " + (ST.cash || 0), "KURS; " + ST.fx]).join("\n");
+    var txt = portfolioText();
     $("pf-io").value = txt; $("pf-io").select();
     var msg = "Portfel jest w polu powyżej. Skopiuj go i wklej w aplikacji na drugim urządzeniu.";
     try { navigator.clipboard.writeText(txt).then(function () { $("pf-io-msg").textContent = "Portfel skopiowany do schowka. Wklej go w aplikacji na drugim urządzeniu."; }, function () {}); } catch (e) {}
     $("pf-io-msg").textContent = msg;
   });
+  $("pf-link").addEventListener("click", function () {
+    var url = location.origin + location.pathname + "#wczytaj=" + b64u("OSOBA; " + (PF.active ? PF.active.name.replace(/[;\n\r\t]/g, " ") : "") + "\n" + portfolioText());
+    $("pf-io").value = url; $("pf-io").select();
+    $("pf-io-msg").textContent = "Link jest w polu powyżej. Otwórz go na drugim urządzeniu, a portfel doda się tam jako nowa osoba. Link zawiera cały portfel, więc wysyłaj go tylko sobie.";
+    try { navigator.clipboard.writeText(url).then(function () { $("pf-io-msg").textContent = "Link skopiowany do schowka. Otwórz go na drugim urządzeniu, a portfel doda się tam jako nowa osoba. Link zawiera cały portfel, więc wysyłaj go tylko sobie."; }, function () {}); } catch (e) {}
+  });
   $("pf-import").addEventListener("click", function () {
-    var lines = $("pf-io").value.split(/\r?\n/), pos = [], cash = null, fx = null, err = "", today = new Date().toISOString().slice(0, 10);
-    lines.forEach(function (ln, k) {
-      if (err || !ln.trim()) return;
-      var f = ln.split(/[;\t]/).map(function (x) { return x.trim(); }), key = f[0].toUpperCase();
-      if (key === "KURS") { var r = num(f[1]); if (!(r > 0 && r < 100)) err = "Wiersz " + (k + 1) + ": podaj kurs dolara w złotych."; else fx = r; return; }
-      if (key === "GOTOWKA" || key === "GOTÓWKA" || key === "CASH") { var c = num(f[1]); if (!(c >= 0)) err = "Wiersz " + (k + 1) + ": podaj kwotę gotówki."; else cash = c; return; }
-      var px = num(f[2]), qty = num(f[3]);
-      if (f.length < 4) err = "Wiersz " + (k + 1) + ": potrzebne są cztery pola rozdzielone średnikami.";
-      else if (!/^[A-Z0-9.\-]{1,12}$/.test(key)) err = "Wiersz " + (k + 1) + ": nieprawidłowy symbol spółki.";
-      else if (!/^\d{4}-\d{2}-\d{2}$/.test(f[1]) || f[1] > today) err = "Wiersz " + (k + 1) + ": data musi mieć postać RRRR-MM-DD i nie może być z przyszłości.";
-      else if (!(px > 0) || !(qty > 0)) err = "Wiersz " + (k + 1) + ": cena i liczba akcji muszą być większe od zera.";
-      else pos.push({ id: newId(), s: key, date: f[1], px: px, qty: qty });
-    });
-    if (!err && !pos.length && cash === null) err = "Pole jest puste. Wklej tekst portfela.";
+    var pr = parsePortfolioText($("pf-io").value), pos = pr.pos, cash = pr.cash, fx = pr.fx, err = pr.err;
     if (err) { $("pf-io-msg").textContent = err + " Nic nie zostało zmienione."; return; }
     ST.positions = pos; if (cash !== null) ST.cash = cash; if (fx !== null) ST.fx = fx;
     endEdit(); persist(); renderPortfolio();
@@ -1077,6 +1130,7 @@ var TIPS = {
   "h-io": "Zapisuje cały portfel jako tekst albo wczytuje go z tekstu. Przydaje się do przeniesienia portfela między telefonem a komputerem.",
   "io-export": "Wypisuje Twoje pozycje i gotówkę w polu tekstowym i kopiuje je do schowka.",
   "io-import": "Zastępuje obecny portfel pozycjami z pola tekstowego. Każdy wiersz to: symbol; data zakupu; cena; liczba akcji.",
+  "io-link": "Tworzy link, który po otwarciu na innym urządzeniu dodaje tam ten portfel jako nową osobę. Link zawiera cały portfel, więc wysyłaj go tylko sobie.",
   "nav-instrukcja": "Opis wszystkich funkcji aplikacji i kolejność pracy krok po kroku.",
   "preset:Trend i zysk": "Zestaw wyjściowy: kupuje spółki w trendzie wzrostowym z rosnącym zyskiem. Trzyma do 5 pozycji i sprzedaje po spadku o 25% od szczytu.",
   "preset:Ostrożny": "Więcej mniejszych pozycji, sprzedaż już po spadku o 15% od szczytu i ostrzejsze warunki kupna. Mniejsze wahania kosztem zysku.",
@@ -1223,7 +1277,7 @@ function renderInstruction() {
     '<tr><th colspan="2">Pozycje</th></tr>' + rows([["Tabela pozycji", "h-pos"], ["Spółka", "pt-sym"], ["Kupno", "pt-date"], ["Cena ($)", "pt-px"], ["Liczba", "pt-qty"], ["Kurs ($)", "c-close"], ["Wartość", "pt-val"], ["Wynik", "pt-ret"], ["Próg sprzedaży", "c-stop"], ["Zapas do progu", "c-tostop"], ["Stan", "pc-state"], ["Edytuj", "pf-edit"], ["Usuń", "pf-del"]]) +
     '<tr><th colspan="2">Dodawanie</th></tr>' + rows([["Spółka", "pf-sym"], ["Data zakupu", "pf-date"], ["Cena zakupu", "pf-px"], ["Liczba akcji", "pf-qty"], ["Wolna gotówka", "cash"], ["Kurs dolara", "fx"], ["Razem", "pf-total"], ["Miejsce zapisu", "store"]]) +
     '<tr><th colspan="2">Kursy na żywo</th></tr>' + rows([["Kursy na żywo", "h-live"], ["Klucz Finnhub", "live-key"], ["○ Tylko kurs", "a-liveonly"]]) +
-    '<tr><th colspan="2">Przenoszenie</th></tr>' + rows([["Portfel jako tekst", "h-io"], ["Pokaż mój portfel jako tekst", "io-export"], ["Wczytaj portfel z tekstu", "io-import"]]) + "</table></div></div>" +
+    '<tr><th colspan="2">Przenoszenie</th></tr>' + rows([["Portfel jako tekst", "h-io"], ["Pokaż mój portfel jako tekst", "io-export"], ["Wczytaj portfel z tekstu", "io-import"], ["Skopiuj link z portfelem", "io-link"]]) + "</table></div></div>" +
     '<div class="card"><h2>Osoby</h2><p style="margin-bottom:10px">Z aplikacji może korzystać kilka osób na jednym urządzeniu. Każda ma własny portfel i własne ustawienia, a dane są zapisane tylko w tej przeglądarce.</p><div class="scroll"><table class="ptab">' +
     rows([["Lista osób", "h-people"], ["Przycisk z nazwą osoby", "person"], ["Nowa osoba", "pp-new"], ["Hasło (opcjonalnie)", "pp-newpw"], ["Zamknij portfel", "pp-logout"], ["Zmień nazwę lub hasło", "pp-edit"], ["Usuń osobę", "pp-del"], ["Przycisk w nagłówku", "who"]]) + "</table></div></div>" +
     '<div class="card"><h2>Słowniczek</h2><div class="scroll"><table class="ptab">' +
@@ -1248,8 +1302,9 @@ function route() {
   if (R) { if (v === "strategia") renderStrategy(); if (v === "skaner") renderScanner(); }
 }
 $("asof").textContent = "Notowania do " + dstr(M.dates[N - 1]) + " · " + UNI.length + " popularnych spółek z USA";
-buildParams(); syncParams(); renderInstruction(); initPortfolio(); compute(); route(); initPeople(); initLive();
-window.addEventListener("hashchange", route);
+buildParams(); syncParams(); renderInstruction(); initPortfolio(); compute(); checkLink(); route(); initPeople(); initLive();
+window.addEventListener("hashchange", function () { checkLink(); route(); });
+$("link-card").addEventListener("click", function (e) { var b = e.target.closest("[data-link]"); if (!b) return; if (b.dataset.link === "yes") acceptLink(); else { LINK = null; renderLink(); } });
 $("trades-more").addEventListener("click", function () { ui.allTrades = !ui.allTrades; renderStrategy(); });
 $("scanlist").addEventListener("click", function (e) {
   var rg = e.target.closest("[data-range]"); if (rg) { ui.range = rg.dataset.range; renderDetail(); return; }
