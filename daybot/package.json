@@ -1,0 +1,13 @@
+{
+  "name": "daybot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bot dzienny do Pulpitu sygnałów: kupno na otwarciu, sprzedaż przed zamknięciem tej samej sesji (Alpaca).",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node test/selftest.js && node test/apitest.js",
+    "plan": "node bot.js plan",
+    "start": "node bot.js run",
+    "status": "node bot.js status"
+  }
+}
