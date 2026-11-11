@@ -261,7 +261,8 @@
 
   /* st = { positions: [{s, date: "RRRR-MM-DD", px, qty}], cash }.
      Każda pozycja jest prowadzona regułami sprzedaży od dnia zakupu; wolne miejsca dostają kandydatów do kupna. */
-  function actions(M, R, st) {
+  /* live = { SYMBOL: bieżący kurs } (opcjonalnie): zastępuje ostatnie zamknięcie w wycenie i w zapasie do progu */
+  function actions(M, R, st, live) {
     var P = R.P, N = M.dates.length, TT = M.tickers, ev = R.evalDays, lastEval = -1, prevEval = -1, i;
     for (i = N - 1; i >= 0; i--) if (ev[i]) { if (lastEval < 0) lastEval = i; else { prevEval = i; break; } }
     var bySym = {}; TT.forEach(function (T, t) { bySym[T.s] = t; });
@@ -270,7 +271,12 @@
     positions.forEach(function (p) {
       heldSyms[p.s] = true;
       var t = bySym[p.s];
-      if (t === undefined) { var atCost = p.qty * p.px; value += atCost; cost += atCost; items.push({ type: "nodata", s: p.s, p: p, value: atCost }); keep++; return; }   // bez notowań: wartość po cenie zakupu
+      var lp = live && live[p.s] > 0 ? live[p.s] : 0;
+      if (t === undefined) {   // bez historii notowań: wartość po kursie na żywo, a gdy go nie ma, po cenie zakupu
+        var v0 = p.qty * (lp || p.px); value += v0; cost += p.qty * p.px; keep++;
+        items.push(lp ? { type: "nodata", s: p.s, p: p, value: v0, close: lp, ret: lp / p.px - 1, pnl: v0 - p.qty * p.px, hasPx: true } : { type: "nodata", s: p.s, p: p, value: v0 });
+        return;
+      }
       var T = TT[t], I = R.ind[t], d = dateInt(p.date), e0 = N - 1, k;
       for (k = 0; k < N; k++) if (M.dates[k] >= d) { e0 = k; break; }
       if (e0 < T.start) e0 = T.start;
@@ -279,7 +285,8 @@
         if (T.c[k] > peak) peak = T.c[k];
         if (ev[k] && !sig) { var why = exitReason(T, I, P, k, peak); if (why) sig = { i: k, why: why }; }
       }
-      var c = T.c[N - 1], val = p.qty * c;
+      var c = lp || T.c[N - 1], val = p.qty * c;
+      if (c > peak) peak = c;
       var a = P.useTrail ? peak * (1 - P.trail / 100) : -Infinity;
       var b = P.useTrendExit && isFinite(I.smaL[N - 1]) ? I.smaL[N - 1] * (1 - P.exitBuffer / 100) : -Infinity;
       var stop = Math.max(a, b); if (!isFinite(stop)) stop = NaN;
@@ -296,7 +303,7 @@
     });
     var left = cash + sellValue;   // gotówka dostępna po wykonaniu sprzedaży, rozdzielana po kolei
     var buys = cand.slice(0, free).map(function (t) {
-      var T = TT[t], c = T.c[N - 1], amount = total > 0 ? Math.max(0, Math.min(total * R.weight, left)) : NaN;
+      var T = TT[t], c = live && live[T.s] > 0 ? live[T.s] : T.c[N - 1], amount = total > 0 ? Math.max(0, Math.min(total * R.weight, left)) : NaN;
       if (total > 0) left -= amount;
       return { type: "buy", s: T.s, n: T.n, t: t, close: c, amount: amount, shares: amount / c, mom: R.ind[t].mom[lastEval],
         fresh: prevEval < 0 || !entryOk(T, R.ind[t], P, prevEval) };
