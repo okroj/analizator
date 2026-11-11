@@ -1,0 +1,10 @@
+{
+  "extra": [
+    { "s": "AMZN", "n": "Amazon" },
+    { "s": "V", "n": "Visa" },
+    { "s": "PLTR", "n": "Palantir" },
+    { "s": "MU", "n": "Micron" },
+    { "s": "AVGO", "n": "Broadcom" },
+    { "s": "SPCX", "n": "SpaceX" }
+  ]
+}

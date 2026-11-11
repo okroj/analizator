@@ -1,0 +1,1239 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analizator giełdy</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0e1317">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* Układ: najpierw ryzyko. Werdykt i obsunięcie na górze, parametry obok wyników, liczby krojem maszynowym. */
+:root {
+  --bg: #e9edf0; --surface: #f9fafb; --ink: #0f171e; --muted: #566370; --line: #d0d7dd;
+  --accent: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a;
+  --good: #0ca30c; --crit: #d03b3b; --warn: #b77a00;
+  --font-display: "Archivo", "Arial Narrow", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", system-ui, "Segoe UI", sans-serif;
+  --font-num: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1317; --surface: #171d23; --ink: #ecf0f3; --muted: #9eabb7; --line: #2a333c;
+    --accent: #3987e5; --series-2: #d95926; --series-3: #199e70; --warn: #fab219;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0e1317; --surface: #171d23; --ink: #ecf0f3; --muted: #9eabb7; --line: #2a333c;
+  --accent: #3987e5; --series-2: #d95926; --series-3: #199e70; --warn: #fab219;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 400 15px/1.5 var(--font-body); -webkit-text-size-adjust: 100%; }
+h1, h2, h3 { font-family: var(--font-display); font-stretch: 78%; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+h2 { font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+.num { font-family: var(--font-num); font-variant-numeric: tabular-nums; }
+button, input { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 0 16px 48px; }
+
+/* nagłówek */
+.top { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 24px; padding: 20px 0 12px; }
+.brand { font-family: var(--font-display); font-stretch: 66%; font-weight: 800; font-size: 34px; line-height: 1; text-transform: uppercase; letter-spacing: .02em; }
+.brand span { color: var(--accent); }
+.asof { color: var(--muted); font-size: 13px; }
+nav { display: flex; gap: 4px; margin-left: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 3px; }
+nav a { padding: 7px 14px; border-radius: 6px; text-decoration: none; color: var(--muted); font-weight: 600; font-size: 14px; }
+nav a[aria-current="page"] { background: var(--ink); color: var(--surface); }
+
+/* pasek przyklejony na telefonie */
+.mini { display: none; position: sticky; top: 0; z-index: 5; background: var(--ink); color: var(--surface); margin: 0 -16px; padding: 7px 16px; font-size: 12px; gap: 6px 16px; flex-wrap: wrap; }
+.mini b { font-family: var(--font-num); font-weight: 500; }
+.mini i { font-style: normal; opacity: .7; }
+
+.view[hidden] { display: none; }
+.grid { display: grid; grid-template-columns: 350px minmax(0, 1fr); grid-template-areas: "params summary" "params tables"; gap: 16px; align-items: start; }
+.params { grid-area: params; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; }
+.summary { grid-area: summary; display: grid; gap: 16px; min-width: 0; }
+.tables { grid-area: tables; display: grid; gap: 16px; min-width: 0; }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+.card > h2 { margin-bottom: 12px; }
+
+/* werdykt */
+.verdict { display: grid; gap: 14px; }
+.vhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12.5px; font-weight: 600; border: 1.5px solid currentColor; white-space: nowrap; }
+.pill.good { color: var(--good); } .pill.crit { color: var(--crit); } .pill.warn { color: var(--warn); } .pill.mute { color: var(--muted); } .pill.acc { color: var(--accent); }
+.vtext { font-size: 15px; max-width: 68ch; }
+.gauge { display: grid; gap: 8px; }
+.grow { display: grid; grid-template-columns: 118px minmax(0, 1fr) 74px; gap: 10px; align-items: center; font-size: 13px; }
+.gbar { height: 14px; background: color-mix(in srgb, var(--line) 55%, transparent); border-radius: 0 4px 4px 0; position: relative; }
+.gbar span { position: absolute; inset: 0 auto 0 0; border-radius: 0 4px 4px 0; }
+.gbar.s span { background: var(--accent); } .gbar.b span { background: var(--series-2); }
+.grow .num { text-align: right; font-weight: 500; }
+.gcap { font-size: 12.5px; color: var(--muted); }
+
+.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.tile { background: var(--surface); padding: 12px 14px; display: grid; gap: 2px; align-content: start; }
+.tile .lab { font-size: 12px; color: var(--muted); }
+.tile .val { font-family: var(--font-num); font-size: 22px; font-weight: 500; line-height: 1.2; }
+.tile .cmp { font-size: 12px; color: var(--muted); }
+.tile .cmp b { font-family: var(--font-num); font-weight: 500; color: var(--ink); }
+
+/* wykresy */
+.legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 14px; height: 0; border-top: 2px solid; display: inline-block; }
+.legend i.dash { border-top-style: dashed; }
+.legend em { font-style: normal; font-size: 11px; }
+.chart { position: relative; touch-action: pan-y; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart text { font-family: var(--font-num); font-size: 10.5px; fill: var(--muted); }
+.chart .end { fill: var(--ink); font-size: 11px; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.tip { position: absolute; top: 4px; pointer-events: none; background: var(--ink); color: var(--surface); border-radius: 6px; padding: 6px 9px; font-size: 12px; line-height: 1.45; white-space: nowrap; z-index: 2; }
+.tip b { font-family: var(--font-num); font-weight: 500; }
+.tip i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.note { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; max-width: 72ch; }
+
+/* tabele */
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { padding: 7px 10px; text-align: right; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th:first-child, td:first-child { text-align: left; padding-left: 0; }
+th:last-child, td:last-child { padding-right: 0; }
+thead th { font-size: 12px; font-weight: 600; color: var(--muted); }
+td.num, td .num { font-family: var(--font-num); }
+tbody tr:last-child td { border-bottom: 0; }
+.pos { color: var(--good); } .neg { color: var(--crit); }
+.linkbtn { background: none; border: 0; padding: 8px 0 0; color: var(--accent); font-weight: 600; cursor: pointer; font-size: 13.5px; }
+
+/* parametry */
+.params h2 { display: flex; justify-content: space-between; align-items: center; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 4px; }
+.chip { border: 1px solid var(--line); background: var(--bg); border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.chip:hover { border-color: var(--muted); }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+fieldset { border: 0; border-top: 1px solid var(--line); margin: 14px 0 0; padding: 12px 0 0; display: grid; gap: 12px; min-width: 0; }
+legend { font-family: var(--font-display); font-stretch: 78%; font-weight: 700; font-size: 12.5px; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); padding: 0 8px 0 0; float: left; width: 100%; margin-bottom: 2px; }
+.rule { display: grid; gap: 6px; }
+.rule.off .sub { opacity: .4; }
+.tog { display: grid; grid-template-columns: auto 1fr; gap: 10px; align-items: start; cursor: pointer; font-weight: 500; font-size: 14px; line-height: 1.35; }
+.tog input { appearance: none; -webkit-appearance: none; width: 34px; height: 20px; border-radius: 999px; background: var(--line); position: relative; margin: 0; cursor: pointer; flex: none; transition: background .12s; }
+.tog input::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); transition: transform .12s; box-shadow: 0 1px 2px rgba(0,0,0,.3); }
+.tog input:checked { background: var(--accent); }
+.tog input:checked::after { transform: translateX(14px); }
+.sub { display: grid; grid-template-columns: minmax(0, 1fr) 84px; gap: 10px; align-items: center; padding-left: 44px; font-size: 13px; color: var(--muted); }
+.sub.flat { padding-left: 0; }
+.sub label { grid-column: 1 / -1; margin-bottom: -4px; }
+.sub output { font-family: var(--font-num); color: var(--ink); text-align: right; font-size: 13px; }
+input[type=range] { width: 100%; accent-color: var(--accent); margin: 0; height: 22px; }
+[hidden] { display: none !important; }
+select, input[type=date], input[type=text], input[type=password] { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-family: var(--font-body); font-size: 14px; min-height: 34px; }
+.todo { display: grid; gap: 8px; }
+.act { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 2px 12px; align-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.act .pill { justify-self: start; }
+.act .what { font-size: 14.5px; }
+.act .why { grid-column: 2; font-size: 13px; color: var(--muted); }
+.pf-sum { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13.5px; color: var(--muted); }
+.pf-sum b { font-family: var(--font-num); font-weight: 500; color: var(--ink); }
+.pf-sum i { font-style: normal; font-family: var(--font-num); }
+.pf-sum b.pos { color: var(--good); } .pf-sum b.neg { color: var(--crit); }
+.pf-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; align-items: end; }
+.pf-form label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.pf-form .chip { min-height: 34px; }
+.store { font-size: 12.5px; color: var(--muted); }
+.icon-btn { border: 1px solid var(--line); background: none; border-radius: 6px; padding: 3px 9px; cursor: pointer; font-size: 12.5px; }
+.icon-btn:hover { border-color: var(--crit); color: var(--crit); }
+.icon-btn.edit:hover { border-color: var(--accent); color: var(--accent); }
+textarea { width: 100%; min-height: 150px; background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; font-family: var(--font-num); font-size: 13px; line-height: 1.5; resize: vertical; }
+input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-family: var(--font-num); font-size: 14px; }
+.derived { font-size: 12.5px; color: var(--muted); background: var(--bg); border-radius: 6px; padding: 8px 10px; }
+.alert { border: 1.5px solid var(--crit); color: var(--crit); border-radius: 8px; padding: 8px 12px; font-size: 13.5px; font-weight: 500; }
+
+/* skaner */
+.counts { display: flex; flex-wrap: wrap; gap: 8px; }
+.scanlist { display: grid; gap: 0; }
+.srow { display: grid; grid-template-columns: 92px minmax(120px, 1.3fr) repeat(4, minmax(78px, 1fr)) minmax(150px, 1.6fr); gap: 4px 12px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); background: none; border-left: 0; border-right: 0; border-top: 0; text-align: left; width: 100%; cursor: pointer; font-size: 13.5px; }
+.srow:hover .tk { color: var(--accent); }
+.srow[aria-expanded="true"] { border-bottom-color: transparent; }
+.srow.head { cursor: default; font-size: 12px; font-weight: 600; color: var(--muted); padding: 0 0 6px; }
+.srow .tk { font-family: var(--font-display); font-stretch: 78%; font-weight: 700; font-size: 16px; }
+.srow .nm { color: var(--muted); font-size: 12.5px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.srow .c { text-align: right; }
+.srow .c small { display: none; color: var(--muted); font-family: var(--font-body); font-size: 11px; }
+.checks { display: flex; flex-wrap: wrap; gap: 4px; }
+.ck { font-size: 11.5px; padding: 1px 7px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+.ck.ok { color: var(--ink); } .ck.no { text-decoration: line-through; opacity: .75; }
+.detail { padding: 4px 0 18px; border-bottom: 1px solid var(--line); display: grid; gap: 10px; }
+.dhead { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
+.dfacts { font-size: 13.5px; max-width: 72ch; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: none; padding: 4px 10px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+
+/* metoda */
+.prose { display: grid; gap: 16px; max-width: 760px; }
+.prose ul { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.prose p { margin: 0; }
+
+.hint { position: fixed; z-index: 20; max-width: 300px; background: var(--ink); color: var(--surface); padding: 8px 11px; border-radius: 7px; font-size: 12.5px; line-height: 1.45; pointer-events: none; box-shadow: 0 4px 14px rgba(0, 0, 0, .25); }
+.hint[hidden] { display: none; }
+.tourbtn { margin-left: auto; background: var(--surface); align-self: center; }
+.tourbtn2 { background: var(--surface); align-self: center; }
+.tourbtn2 + nav { margin-left: 0; }
+#who { max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.people { display: flex; flex-wrap: wrap; gap: 6px; }
+#view-portfel.locked .card:not(#people) { display: none; }
+.chip.primary { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+.chip:disabled { opacity: .4; cursor: default; }
+.welcome { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
+.welcome[hidden], .tour[hidden] { display: none; }
+.welcome span { flex: 1 1 240px; }
+.tour-hole { position: fixed; z-index: 30; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(8, 12, 16, .62); outline: 2px solid var(--accent); pointer-events: none; transition: left .18s, top .18s, width .18s, height .18s; }
+.tour-card { position: fixed; z-index: 31; width: min(340px, calc(100vw - 24px)); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); display: grid; gap: 6px; }
+.tour-card h3 { font-size: 18px; font-weight: 700; }
+.tour-card p { margin: 0; font-size: 14px; }
+.tour-step { font-family: var(--font-num); font-size: 11.5px; color: var(--muted); }
+.tour-btns { display: flex; gap: 6px; margin-top: 6px; align-items: center; }
+.tour-btns span { flex: 1; }
+[data-tip^="sym:"], h2[data-tip], .tile[data-tip], .srow.head [data-tip], th[data-tip], .gauge[data-tip], .derived[data-tip] { cursor: help; }
+.prose.wide { max-width: 860px; }
+.prose ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.ptab td, .ptab th { white-space: normal; text-align: left; vertical-align: top; padding-left: 0; }
+.ptab td:first-child { font-weight: 600; width: 36%; padding-right: 14px; }
+.ptab th { font-family: var(--font-display); font-stretch: 78%; font-size: 12.5px; text-transform: uppercase; letter-spacing: .09em; padding-top: 16px; }
+.ptab tr:first-child th { padding-top: 0; }
+
+@media (max-width: 920px) {
+  .grid { grid-template-columns: minmax(0, 1fr); grid-template-areas: "summary" "params" "tables"; }
+  .params { position: static; max-height: none; }
+  .mini { display: flex; }
+  nav { margin-left: 0; width: 100%; overflow-x: auto; } nav a { flex: 1; text-align: center; padding: 7px 3px; font-size: 13px; }
+  .act { grid-template-columns: minmax(0, 1fr); } .act .why { grid-column: 1; }
+  .brand { font-size: 28px; }
+  .top > div:first-child { flex: 1 1 0; min-width: 0; }
+  .srow { grid-template-columns: 96px repeat(3, minmax(0, 1fr)); gap: 6px 10px; }
+  .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  th, td { padding: 6px 7px; font-size: 12.5px; }
+  .srow.head { display: none; }
+  .srow .c { text-align: left; } .srow .c small { display: block; }
+  .srow .name { grid-column: 2 / -1; }
+  .srow .checks { grid-column: 1 / -1; }
+  .grow { grid-template-columns: 96px minmax(0, 1fr) 66px; }
+}
+@media (prefers-reduced-motion: reduce) { .tog input, .tog input::after, .tour-hole { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="brand">Analizator <span>giełdy</span></div>
+      <div class="asof" id="asof"></div>
+    </div>
+    <button class="chip tourbtn" id="who" type="button" data-tip="who"></button>
+    <button class="chip tourbtn2" id="tour-start" type="button" data-tip="tour">Samouczek</button>
+    <nav aria-label="Widoki">
+      <a href="#strategia" id="nav-strategia" data-tip="nav-strategia">Strategia</a>
+      <a href="#skaner" id="nav-skaner" data-tip="nav-skaner">Skaner</a>
+      <a href="#portfel" id="nav-portfel" data-tip="nav-portfel">Portfel</a>
+      <a href="#metoda" id="nav-metoda" data-tip="nav-metoda">Metoda</a>
+      <a href="#instrukcja" id="nav-instrukcja" data-tip="nav-instrukcja">Instrukcja</a>
+    </nav>
+  </header>
+  <div class="welcome" id="welcome" hidden>
+    <span>Pierwszy raz tutaj? Samouczek pokaże krok po kroku, jak korzystać z aplikacji.</span>
+    <button class="chip primary" type="button" data-tour-start>Uruchom samouczek</button>
+    <button class="chip" type="button" id="welcome-no">Nie teraz</button>
+  </div>
+  <div class="mini" id="mini" aria-live="polite"></div>
+
+  <main>
+    <section class="view" id="view-strategia">
+      <div class="grid">
+        <aside class="card params" id="params" aria-label="Parametry strategii"></aside>
+        <div class="summary">
+          <div class="card verdict" id="verdict"></div>
+          <div class="tiles" id="tiles"></div>
+          <div class="card">
+            <h2 data-tip="h-eq">Kapitał w czasie</h2>
+            <div class="legend" id="eq-legend"></div>
+            <div class="chart" id="eq-chart"></div>
+            <p class="note" id="eq-note"></p>
+          </div>
+          <div class="card">
+            <h2 data-tip="h-dd">Obsunięcie kapitału od szczytu</h2>
+            <div class="legend" id="dd-legend"></div>
+            <div class="chart" id="dd-chart"></div>
+          </div>
+        </div>
+        <div class="tables">
+          <div class="card">
+            <h2 data-tip="h-periods">Dopasowanie a sprawdzian</h2>
+            <div class="scroll"><table id="periods"></table></div>
+            <p class="note">Parametry dobieraj, patrząc na okres dopasowania. Okres sprawdzianu pokazuje, czy reguły działają na danych, pod które nie były strojone. Duża różnica między kolumnami oznacza przeuczenie.</p>
+          </div>
+          <div class="card">
+            <h2 data-tip="h-trades">Transakcje</h2>
+            <div class="scroll"><table id="trades"></table></div>
+            <button class="linkbtn" id="trades-more" type="button" data-tip="trades-more"></button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-skaner" hidden>
+      <div class="card" style="display:grid;gap:14px">
+        <div class="dhead">
+          <h2 id="scan-title">Stan spółek</h2>
+          <div class="counts" id="scan-counts"></div>
+        </div>
+        <p class="note" style="margin:0" id="scan-note"></p>
+        <div class="scanlist" id="scanlist"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-portfel" hidden>
+      <div style="display:grid;gap:16px">
+        <div class="card" id="people"></div>
+        <div class="card">
+          <div class="dhead" style="margin-bottom:12px"><h2 data-tip="h-todo">Do zrobienia</h2><span class="store" id="store-note" data-tip="store"></span></div>
+          <div class="todo" id="todo"></div>
+          <p class="note" id="todo-note"></p>
+        </div>
+        <div class="card">
+          <h2 data-tip="h-pos">Twoje pozycje</h2>
+          <div class="pf-sum" id="pf-sum"></div>
+          <div class="scroll" style="margin-top:10px"><table id="pf-table"></table></div>
+        </div>
+        <div class="card">
+          <h2 data-tip="h-add" id="pf-form-title">Dodaj pozycję</h2>
+          <form class="pf-form" id="pf-form" novalidate>
+            <label for="pf-sym" data-tip="pf-sym">Spółka<select id="pf-sym"></select></label>
+            <label for="pf-other" id="pf-other-wrap" data-tip="pf-sym" hidden>Symbol spółki<input type="text" id="pf-other" maxlength="12" autocomplete="off" autocapitalize="characters"></label>
+            <label for="pf-date" data-tip="pf-date">Data zakupu<input type="date" id="pf-date"></label>
+            <label for="pf-px" data-tip="pf-px">Cena zakupu ($)<input type="number" id="pf-px" min="0" step="0.01" inputmode="decimal"></label>
+            <label for="pf-qty" data-tip="pf-qty">Liczba akcji<input type="number" id="pf-qty" min="0" step="any" inputmode="decimal"></label>
+            <button class="chip primary" type="submit" id="pf-add">Dodaj pozycję</button>
+            <button class="chip" type="button" id="pf-cancel" hidden>Anuluj</button>
+          </form>
+          <p class="alert" id="pf-err" role="alert" style="margin:10px 0 0" hidden></p>
+          <div class="pf-form" style="margin-top:16px;max-width:520px">
+            <label for="pf-cash" data-tip="cash">Wolna gotówka na rachunku ($)<input type="number" id="pf-cash" min="0" step="100" inputmode="decimal"></label>
+            <label for="pf-fx" data-tip="fx">Kurs dolara w złotych<input type="number" id="pf-fx" min="0" step="0.01" inputmode="decimal"></label>
+          </div>
+        </div>
+        <div class="card">
+          <h2 data-tip="h-io">Przenieś portfel jako tekst</h2>
+          <label for="pf-io" class="note" style="display:block;margin:0 0 6px">Jeden wiersz na pozycję: symbol; data zakupu (RRRR-MM-DD); cena zakupu w $; liczba akcji. Wiersz „GOTOWKA; kwota” ustawia wolną gotówkę w dolarach, a „KURS; 3.91” kurs dolara w złotych.</label>
+          <textarea id="pf-io" spellcheck="false" autocomplete="off"></textarea>
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+            <button class="chip" type="button" id="pf-export" data-tip="io-export">Pokaż mój portfel jako tekst</button>
+            <button class="chip primary" type="button" id="pf-import" data-tip="io-import">Wczytaj portfel z tekstu</button>
+          </div>
+          <p class="note" id="pf-io-msg" role="status"></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="view" id="view-metoda" hidden>
+      <div class="prose" id="metoda"></div>
+    </section>
+
+    <section class="view" id="view-instrukcja" hidden>
+      <div class="prose wide" id="instrukcja"></div>
+    </section>
+  </main>
+</div>
+
+<div class="tour" id="tour" hidden>
+  <div class="tour-hole" id="tour-hole"></div>
+  <div class="tour-card" id="tour-card" role="dialog" aria-labelledby="tour-title" aria-describedby="tour-text">
+    <div class="tour-step" id="tour-step"></div>
+    <h3 id="tour-title"></h3>
+    <p id="tour-text"></p>
+    <div class="tour-btns"><button class="chip" type="button" id="tour-skip">Zakończ</button><span></span><button class="chip" type="button" id="tour-prev">Wstecz</button><button class="chip primary" type="button" id="tour-next">Dalej</button></div>
+  </div>
+</div>
+<div class="hint" id="hint" role="tooltip" hidden></div>
+<script src="data.js"></script>
+<script src="engine.js"></script>
+<script>
+(function () {
+"use strict";
+var M = window.MARKET, E = window.Engine, N = M.dates.length;
+var UNI = M.tickers.filter(function (t) { return !t.x; }), XTR = M.tickers.filter(function (t) { return t.x; });   // XTR: same kursy, tylko dla Portfela
+var P = Object.assign({}, E.DEFAULTS), R = null, SC = null;
+var ui = { allTrades: false, openTicker: null, range: "5", editId: null };
+var $ = function (id) { return document.getElementById(id); };
+
+/* ---------- formatowanie ---------- */
+function nf(x, d) { return x.toLocaleString("pl-PL", { minimumFractionDigits: d, maximumFractionDigits: d }); }
+function pct(x, d, sign) { if (!isFinite(x)) return "–"; var s = nf(x * 100, d == null ? 1 : d) + "%"; return (sign && x > 0 ? "+" : "") + s.replace("-", "−"); }
+function pc(x, d, sign) { return pct(x / 100, d, sign); }
+function money(x) { return nf(Math.round(x), 0) + " $"; }
+function price(x) { return x == null || !isFinite(x) ? "–" : nf(x, x < 10 ? 3 : 2); }
+function dstr(n) { var s = String(n); return s.slice(6) + "." + s.slice(4, 6) + "." + s.slice(0, 4); }
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+function cls(x) { return x > 0 ? "pos" : x < 0 ? "neg" : ""; }
+
+/* ---------- parametry ---------- */
+var PRESETS = {
+  "Trend i zysk": {},
+  "Ostrożny": { useCross: true, trail: 15, maxPos: 8, useRisk: true, riskPct: 1, growthMin: 10, exitBuffer: 1 },
+  "Agresywny": { maxPos: 3, trail: 35, momMin: 10, useGrowth: false, usePosEps: false, exitBuffer: 5, cooldownWeeks: 2 }
+};
+var SCHEMA = [
+  { t: "Kiedy kupić: wykres", items: [
+    { k: "useTrend", l: "Kurs powyżej średniej długoterminowej", s: [{ k: "smaLong", l: "Długość średniej", min: 50, max: 300, step: 10, u: " sesji" }] },
+    { k: "useCross", l: "Średnia szybka powyżej długoterminowej", s: [{ k: "smaFast", l: "Długość średniej szybkiej", min: 20, max: 100, step: 5, u: " sesji" }] },
+    { k: "useMom", l: "Kurs wzrósł w ostatnich miesiącach", s: [{ k: "momMonths", l: "Okres", min: 3, max: 12, step: 1, u: " mies." }, { k: "momMin", l: "Minimalny wzrost", min: -10, max: 40, step: 5, u: "%" }] }
+  ] },
+  { t: "Kiedy kupić: wyniki spółki", items: [
+    { k: "usePosEps", l: "Spółka ma zysk (zysk na akcję z 12 miesięcy powyżej zera)" },
+    { k: "useGrowth", l: "Zysk na akcję rośnie rok do roku", s: [{ k: "growthMin", l: "Minimalny wzrost", min: -20, max: 60, step: 5, u: "%" }] },
+    { k: "usePe", l: "Cena do zysku (P/E) nie wyższa niż", s: [{ k: "peMax", l: "Maksymalne P/E", min: 10, max: 100, step: 5, u: "" }] }
+  ] },
+  { t: "Kiedy sprzedać", items: [
+    { k: "useTrendExit", l: "Kurs spada pod średnią długoterminową", s: [{ k: "exitBuffer", l: "Margines pod średnią", min: 0, max: 10, step: 1, u: "%" }] },
+    { k: "useTrail", l: "Kurs spada od szczytu po zakupie", s: [{ k: "trail", l: "Wielkość spadku", min: 10, max: 50, step: 5, u: "%" }] },
+    { k: "useFundExit", l: "Zysk na akcję spada rok do roku", s: [{ k: "growthExit", l: "Próg spadku", min: -50, max: 0, step: 5, u: "%" }] },
+    { s: [{ k: "cooldownWeeks", l: "Przerwa przed ponownym zakupem tej samej spółki", min: 0, max: 26, step: 1, u: " tyg." }] }
+  ] },
+  { t: "Portfel i koszty", items: [
+    { n: "capital", l: "Kapitał początkowy ($)" },
+    { s: [{ k: "maxPos", l: "Maksymalna liczba pozycji", min: 1, max: 10, step: 1, u: "" }] },
+    { k: "useRisk", l: "Wielkość pozycji liczona od ryzyka", s: [{ k: "riskPct", l: "Ryzyko na pozycję", min: 0.5, max: 5, step: 0.5, u: "% kapitału" }] },
+    { s: [{ k: "cost", l: "Koszt każdej transakcji (prowizja i poślizg)", min: 0, max: 1, step: 0.05, u: "%" }] },
+    { k: "weekly", l: "Sprawdzaj sygnały raz w tygodniu (wyłącz, aby sprawdzać codziennie)" },
+    { d: true }
+  ] },
+  { t: "Zakres testu", items: [
+    { s: [{ k: "startYear", l: "Początek testu", min: 2006, max: 2020, step: 1, u: "" }] },
+    { s: [{ k: "splitYear", l: "Sprawdzian od roku", min: 2010, max: 2024, step: 1, u: "" }] }
+  ] }
+];
+function fmtParam(s, v) { var d = s.step < 1 ? (s.step < 0.1 ? 2 : 1) : 0; return nf(v, d).replace("-", "−") + s.u; }
+function buildParams() {
+  var h = '<h2>Parametry <button class="linkbtn" style="padding:0;font-size:12.5px;text-transform:none;letter-spacing:0" id="reset" type="button" data-tip="reset">Przywróć domyślne</button></h2><div class="presets" id="presets">';
+  Object.keys(PRESETS).forEach(function (n) { h += '<button class="chip" type="button" data-preset="' + n + '" data-tip="preset:' + n + '" aria-pressed="false">' + n + "</button>"; });
+  h += '</div><div id="alert"></div>';
+  SCHEMA.forEach(function (g) {
+    h += "<fieldset><legend>" + g.t + "</legend>";
+    g.items.forEach(function (it) {
+      if (it.d) { h += '<div class="derived" id="derived" data-tip="derived"></div>'; return; }
+      if (it.n) { h += '<div class="sub flat" data-tip="' + it.n + '"><label for="p-' + it.n + '">' + it.l + '</label><input type="number" id="p-' + it.n + '" data-num="' + it.n + '" min="1000" max="10000000" step="1000" inputmode="numeric" style="grid-column:1/-1"></div>'; return; }
+      h += '<div class="rule" data-rule="' + (it.k || "") + '">';
+      if (it.k) h += '<label class="tog" data-tip="' + it.k + '"><input type="checkbox" id="p-' + it.k + '" data-tog="' + it.k + '"><span>' + it.l + "</span></label>";
+      (it.s || []).forEach(function (s) {
+        h += '<div class="sub' + (it.k ? "" : " flat") + '" data-tip="' + s.k + '"><label for="p-' + s.k + '">' + s.l + '</label><input type="range" id="p-' + s.k + '" data-rng="' + s.k + '" min="' + s.min + '" max="' + s.max + '" step="' + s.step + '"><output id="o-' + s.k + '" for="p-' + s.k + '"></output></div>';
+      });
+      h += "</div>";
+    });
+    h += "</fieldset>";
+  });
+  $("params").innerHTML = h;
+  $("params").addEventListener("input", function (e) {
+    var t = e.target;
+    if (t.dataset.tog) P[t.dataset.tog] = t.checked;
+    else if (t.dataset.rng) P[t.dataset.rng] = +t.value;
+    else if (t.dataset.num) { var v = +t.value; if (!(v >= 1000)) return; P[t.dataset.num] = Math.min(v, 1e7); }
+    else return;
+    if (P.splitYear <= P.startYear) { if (t.dataset.rng === "startYear") P.splitYear = Math.min(2024, P.startYear + 2); else P.startYear = Math.max(2006, P.splitYear - 2); }
+    syncParams(); schedule();
+  });
+  $("params").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-preset]");
+    if (b) { P = Object.assign({}, E.DEFAULTS, { capital: P.capital, cost: P.cost, startYear: P.startYear, splitYear: P.splitYear }, PRESETS[b.dataset.preset]); syncParams(); schedule(); }
+    if (e.target.id === "reset") { P = Object.assign({}, E.DEFAULTS); syncParams(); schedule(); }
+  });
+}
+function findSub(k) { var r; SCHEMA.forEach(function (g) { g.items.forEach(function (it) { (it.s || []).forEach(function (s) { if (s.k === k) r = s; }); }); }); return r; }
+function syncParams() {
+  document.querySelectorAll("[data-tog]").forEach(function (el) { el.checked = !!P[el.dataset.tog]; el.closest(".rule").classList.toggle("off", !el.checked); });
+  document.querySelectorAll("[data-rng]").forEach(function (el) { el.value = P[el.dataset.rng]; $("o-" + el.dataset.rng).textContent = fmtParam(findSub(el.dataset.rng), P[el.dataset.rng]); });
+  var cap = $("p-capital"); if (document.activeElement !== cap) cap.value = P.capital;
+  document.querySelectorAll("[data-preset]").forEach(function (b) {
+    var want = Object.assign({}, E.DEFAULTS, PRESETS[b.dataset.preset]), same = true;
+    for (var k in want) if (["capital", "cost", "startYear", "splitYear"].indexOf(k) < 0 && want[k] !== P[k]) same = false;
+    b.setAttribute("aria-pressed", same ? "true" : "false");
+  });
+  persist();
+}
+var timer = 0;
+function schedule() { clearTimeout(timer); timer = setTimeout(compute, 90); }
+
+/* ---------- wykres liniowy (SVG) ---------- */
+function niceTicks(lo, hi, n) {
+  var span = hi - lo, step = Math.pow(10, Math.floor(Math.log10(span / n))), err = span / n / step;
+  step *= err >= 7.5 ? 10 : err >= 3.5 ? 5 : err >= 1.5 ? 2 : 1;
+  var t = []; for (var v = Math.ceil(lo / step) * step; v <= hi + step * 1e-9; v += step) t.push(Math.abs(v) < step * 1e-9 ? 0 : v); return t;
+}
+function logTicks(lo, hi) {
+  var sets = [[1, 2, 5], [1, 3], [1]], best = [];
+  for (var s = 0; s < sets.length; s++) {
+    var t = [];
+    for (var e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) sets[s].forEach(function (m) { var v = m * Math.pow(10, e); if (v >= lo && v <= hi) t.push(v); });
+    best = t; if (t.length <= 6) break;
+  }
+  return best;
+}
+/* o: {idx, series:[{name,color,get(i),dash}], log, fmt, h, vline, markers:[{i,y,type}], top0} */
+function drawChart(el, o) {
+  var W = Math.max(280, el.clientWidth), H = o.h, ml = 46, mr = W < 520 ? 70 : 82, mt = 10, mb = 22;
+  var idx = o.idx, i0 = idx[0], i1 = idx[idx.length - 1], lo = Infinity, hi = -Infinity;
+  o.series.forEach(function (s) { s.v = idx.map(s.get); s.v.forEach(function (v) { if (isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; } }); });
+  if (o.top0) hi = 0;
+  if (!(hi > lo)) { hi = lo + 1; }
+  var ty = o.log ? Math.log : function (v) { return v; };
+  var pad = (ty(hi) - ty(lo)) * 0.04, a = ty(lo) - pad, b = ty(hi) + (o.top0 ? 0 : pad);
+  var X = function (i) { return ml + (i - i0) / (i1 - i0 || 1) * (W - ml - mr); };
+  var Y = function (v) { return mt + (b - ty(v)) / (b - a) * (H - mt - mb); };
+  var ticks = o.log ? logTicks(Math.exp(a), Math.exp(b)) : niceTicks(a, b, 4);
+  var g = '<svg viewBox="0 0 ' + W + " " + H + '" height="' + H + '" role="img" aria-label="' + esc(o.label) + '">';
+  ticks.forEach(function (v) { var y = Y(v); g += '<line class="grid" x1="' + ml + '" x2="' + (W - mr) + '" y1="' + y + '" y2="' + y + '"/><text x="' + (ml - 6) + '" y="' + (y + 3.5) + '" text-anchor="end">' + o.axis(v) + "</text>"; });
+  /* lata na osi X */
+  var years = [], last = 0;
+  idx.forEach(function (i) { var y = Math.floor(M.dates[i] / 10000); if (y !== last) { if (last) years.push([y, i]); last = y; } });
+  var every = Math.max(1, Math.ceil(years.length / Math.max(2, Math.floor((W - ml - mr) / 52))));
+  years.forEach(function (yr) { if (yr[0] % every === 0) g += '<text x="' + X(yr[1]) + '" y="' + (H - 6) + '" text-anchor="middle">' + yr[0] + "</text>"; });
+  if (o.vline != null && o.vline > i0 && o.vline < i1) {
+    var vx = X(o.vline);
+    g += '<line class="cross" x1="' + vx + '" x2="' + vx + '" y1="' + mt + '" y2="' + (H - mb) + '"/><text x="' + (vx + 5) + '" y="' + (mt + 10) + '">sprawdzian</text>';
+  }
+  var ends = [];
+  o.series.forEach(function (s) {
+    var d = "", pen = false;
+    s.v.forEach(function (v, k) { if (!isFinite(v)) { pen = false; return; } d += (pen ? "L" : "M") + X(idx[k]).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
+    g += '<path class="ln" d="' + d + '" stroke="' + s.color + '"' + (s.dash ? ' stroke-dasharray="5 4"' : "") + "/>";
+    var lv = s.v[s.v.length - 1];
+    if (isFinite(lv)) { g += '<circle cx="' + X(i1) + '" cy="' + Y(lv) + '" r="4" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2"/>'; ends.push({ y: Y(lv), t: (o.endFmt || o.fmt)(lv) }); }
+  });
+  ends.sort(function (p, q) { return p.y - q.y; });
+  for (var k = 1; k < ends.length; k++) if (ends[k].y - ends[k - 1].y < 13) ends[k].y = ends[k - 1].y + 13;
+  ends.forEach(function (e2) { g += '<text class="end" x="' + (W - mr + 9) + '" y="' + (e2.y + 3.5) + '">' + esc(e2.t) + "</text>"; });
+  (o.markers || []).forEach(function (m) {
+    if (m.i < i0 || m.i > i1) return;
+    var x = X(m.i), y = Y(m.y), up = m.type === "buy";
+    var pts = up ? [x, y + 6, x - 6, y + 17, x + 6, y + 17] : [x, y - 6, x - 6, y - 17, x + 6, y - 17];
+    g += '<polygon points="' + pts.join(" ") + '" fill="var(--' + (up ? "good" : "crit") + ')" stroke="var(--surface)" stroke-width="2" stroke-linejoin="round"/>';
+  });
+  g += '<line class="cross" id="cx" x1="0" x2="0" y1="' + mt + '" y2="' + (H - mb) + '" visibility="hidden"/>';
+  o.series.forEach(function (s, n) { g += '<circle id="cd' + n + '" r="4" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2" visibility="hidden"/>'; });
+  g += '<rect x="' + ml + '" y="' + mt + '" width="' + (W - ml - mr) + '" height="' + (H - mt - mb) + '" fill="transparent"/></svg><div class="tip" hidden></div>';
+  el.innerHTML = g;
+  var svg = el.firstChild, tip = el.lastChild, cx = svg.querySelector("#cx");
+  function move(ev) {
+    var r = svg.getBoundingClientRect(), px = (ev.clientX - r.left) / r.width * W;
+    var target = i0 + (px - ml) / (W - ml - mr) * (i1 - i0), lo2 = 0, hi2 = idx.length - 1;
+    while (lo2 < hi2) { var mid = (lo2 + hi2) >> 1; if (idx[mid] < target) lo2 = mid + 1; else hi2 = mid; }
+    if (lo2 > 0 && target - idx[lo2 - 1] < idx[lo2] - target) lo2--;
+    var i = idx[lo2], x = X(i);
+    cx.setAttribute("x1", x); cx.setAttribute("x2", x); cx.setAttribute("visibility", "visible");
+    var html = "<div>" + dstr(M.dates[i]) + "</div>";
+    o.series.forEach(function (s, n) {
+      var v = s.v[lo2], dot = svg.querySelector("#cd" + n);
+      if (isFinite(v)) { dot.setAttribute("cx", x); dot.setAttribute("cy", Y(v)); dot.setAttribute("visibility", "visible"); html += '<div><i style="background:' + s.color + '"></i>' + esc(s.name) + " <b>" + o.fmt(v) + "</b></div>"; }
+      else dot.setAttribute("visibility", "hidden");
+    });
+    (o.markers || []).forEach(function (m) { if (Math.abs(m.i - i) <= 3) html += "<div>" + (m.type === "buy" ? "▲ sygnał kupna" : "▼ sygnał sprzedaży") + "</div>"; });
+    tip.innerHTML = html; tip.hidden = false;
+    var tw = tip.offsetWidth, left = x / W * r.width + 12; if (left + tw > r.width) left = x / W * r.width - tw - 12;
+    tip.style.left = Math.max(0, left) + "px";
+  }
+  function leave() { tip.hidden = true; cx.setAttribute("visibility", "hidden"); o.series.forEach(function (s, n) { svg.querySelector("#cd" + n).setAttribute("visibility", "hidden"); }); }
+  svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", leave);
+}
+function legend(el, items) { el.innerHTML = items.map(function (s) { return "<span>" + (s.glyph ? '<em style="color:' + s.color + '">' + s.glyph + "</em>" : '<i class="' + (s.dash ? "dash" : "") + '" style="border-color:' + s.color + '"></i>') + esc(s.name) + "</span>"; }).join(""); }
+function sample(a, b) { var out = []; for (var i = a; i <= b; i++) if (i === a || i === b || R.evalDays[i] || !P.weekly && (i - a) % 5 === 0) out.push(i); if (!P.weekly) out = out.filter(function (i, k) { return i === a || i === b || (i - a) % 5 === 0; }); return out; }
+
+/* ---------- obliczenia i widok Strategia ---------- */
+function compute() {
+  R = E.run(M, P); SC = E.scan(M, R);
+  renderStrategy(); renderScanner(); renderPortfolio(); renderMethod();
+}
+function drawdown(arr, a) { var out = new Float64Array(N), pk = arr[a]; for (var i = a; i < N; i++) { if (arr[i] > pk) pk = arr[i]; out[i] = arr[i] / pk - 1; } return out; }
+var SER_S = { name: "Strategia", short: "Strategia", color: "var(--accent)" }, SER_B = { name: "Kup i trzymaj te same spółki", short: "Kup i trzymaj", color: "var(--series-2)", dash: true };
+function renderStrategy() {
+  var S = R.stats.all, B = R.stats.allB, anyEntry = P.useTrend || P.useCross || P.useMom || P.usePosEps || P.useGrowth || P.usePe, anyExit = P.useTrendExit || P.useTrail || P.useFundExit;
+  var al = "";
+  if (!anyEntry) al = "Włącz przynajmniej jeden warunek kupna. Bez niego strategia nigdy nie otwiera pozycji.";
+  else if (!anyExit) al = "Żaden warunek sprzedaży nie jest włączony. Strategia kupuje i trzyma do końca testu.";
+  $("alert").innerHTML = al ? '<div class="alert" role="alert">' + al + "</div>" : "";
+  var better = S.cagr > B.cagr, shallower = S.maxDD > B.maxDD, pill, txt;
+  if (better && shallower) { pill = ["good", "▲ Lepsza od kup i trzymaj"]; txt = "wyższy zysk przy płytszym obsunięciu"; }
+  else if (!better && shallower) { pill = ["warn", "◆ Mniejsze ryzyko, mniejszy zysk"]; txt = "płytsze obsunięcie, ale niższy zysk"; }
+  else if (better && !shallower) { pill = ["warn", "◆ Większy zysk, większe ryzyko"]; txt = "wyższy zysk, ale głębsze obsunięcie"; }
+  else { pill = ["crit", "▼ Słabsza od kup i trzymaj"]; txt = "niższy zysk i głębsze obsunięcie"; }
+  var mx = Math.max(-S.maxDD, -B.maxDD, 0.01);
+  $("verdict").innerHTML =
+    '<div class="vhead"><h2>Werdykt za lata ' + Math.floor(M.dates[R.start] / 10000) + "–" + Math.floor(M.dates[R.end] / 10000) + '</h2><span class="pill ' + pill[0] + '" data-tip="verdict">' + pill[1] + "</span></div>" +
+    '<p class="vtext" style="margin:0">Strategia dała <b class="num">' + pct(S.cagr, 1, true) + "</b> rocznie, a w najgorszym momencie kapitał spadł o <b class=\"num\">" + pct(-S.maxDD) + "</b> od szczytu. Samo trzymanie tych samych spółek dało <b class=\"num\">" + pct(B.cagr, 1, true) + "</b> rocznie przy spadku o <b class=\"num\">" + pct(-B.maxDD) + "</b>. Wynik: " + txt + ".</p>" +
+    '<div class="gauge" data-tip="gauge"><div class="gcap">Najgłębsze obsunięcie kapitału</div>' +
+    '<div class="grow"><span>Strategia</span><div class="gbar s"><span style="width:' + (-S.maxDD / mx * 100).toFixed(1) + '%"></span></div><span class="num">' + pct(S.maxDD) + "</span></div>" +
+    '<div class="grow"><span>Kup i trzymaj</span><div class="gbar b"><span style="width:' + (-B.maxDD / mx * 100).toFixed(1) + '%"></span></div><span class="num">' + pct(B.maxDD) + "</span></div></div>";
+  var tiles = [
+    ["Zysk roczny", pct(S.cagr, 1, true), "kup i trzymaj <b>" + pct(B.cagr, 1, true) + "</b>"],
+    ["Kapitał końcowy", money(R.equity[R.end]), "kup i trzymaj <b>" + money(R.bench[R.end]) + "</b>"],
+    ["Zysk roczny do obsunięcia", isFinite(S.mar) ? nf(S.mar, 2) : "–", "kup i trzymaj <b>" + (isFinite(B.mar) ? nf(B.mar, 2) : "–") + "</b>"],
+    ["Transakcje zamknięte", String(S.trades), "zyskownych <b>" + pct(S.winRate, 0) + "</b>"],
+    ["Zysk do strat", isFinite(S.profitFactor) ? nf(S.profitFactor, 2) : "–", "suma zysków przez sumę strat"],
+    ["Czas w rynku", pct(S.exposure, 0), "średni udział akcji w kapitale"]
+  ];
+  ["cagr", "final", "mar", "trades", "pf", "expo"].forEach(function (k, n) { tiles[n][3] = k; });
+  $("tiles").innerHTML = tiles.map(function (t) { return '<div class="tile" data-tip="t-' + t[3] + '"><span class="lab">' + t[0] + '</span><span class="val">' + t[1] + '</span><span class="cmp">' + t[2] + "</span></div>"; }).join("");
+  $("mini").innerHTML = "<span><i>Strategia</i> <b>" + pct(S.cagr, 1, true) + "</b> rocznie, obsunięcie <b>" + pct(S.maxDD) + "</b></span><span><i>Kup i trzymaj</i> <b>" + pct(B.cagr, 1, true) + "</b>, <b>" + pct(B.maxDD) + "</b></span>";
+
+  var idx = sample(R.start, R.end);
+  legend($("eq-legend"), [SER_S, SER_B]); legend($("dd-legend"), [SER_S, SER_B]);
+  drawChart($("eq-chart"), { idx: idx, h: 270, log: true, vline: R.split, label: "Kapitał strategii i punktu odniesienia w czasie, skala logarytmiczna",
+    series: [Object.assign({ get: function (i) { return R.equity[i]; } }, SER_S), Object.assign({ get: function (i) { return R.bench[i]; } }, SER_B)],
+    fmt: money, endFmt: function (v) { return v >= 1e6 ? nf(v / 1e6, 2) + " mln $" : money(v); }, axis: function (v) { return v >= 1e6 ? nf(v / 1e6, v % 1e6 ? 1 : 0) + " mln" : v >= 1000 ? nf(v / 1000, 0) + " tys." : nf(v, 0); } });
+  $("eq-note").textContent = "Skala logarytmiczna: taki sam odstęp w pionie oznacza taki sam wzrost procentowy. Start z " + money(P.capital) + ".";
+  var ddS = drawdown(R.equity, R.start), ddB = drawdown(R.bench, R.start);
+  drawChart($("dd-chart"), { idx: idx, h: 170, top0: true, vline: R.split, label: "Obsunięcie kapitału od szczytu",
+    series: [Object.assign({ get: function (i) { return ddS[i]; } }, SER_S), Object.assign({ get: function (i) { return ddB[i]; } }, SER_B)],
+    fmt: function (v) { return pct(v); }, axis: function (v) { return pct(v, 0); } });
+
+  var st = R.stats, y0 = Math.floor(M.dates[R.start] / 10000), ys = Math.floor(M.dates[R.split] / 10000), y1 = Math.floor(M.dates[R.end] / 10000);
+  function row(l, f) { return "<tr><td>" + l + "</td><td class='num'>" + f(st.all, st.allB) + "</td><td class='num'>" + f(st.ins, st.insB) + "</td><td class='num'>" + f(st.oos, st.oosB) + "</td></tr>"; }
+  $("periods").innerHTML = "<thead><tr><th></th><th data-tip='col-all'>Cały okres<br>" + y0 + "–" + y1 + "</th><th data-tip='col-ins'>Dopasowanie<br>" + y0 + "–" + (ys - 1) + "</th><th data-tip='col-oos'>Sprawdzian<br>" + ys + "–" + y1 + "</th></tr></thead><tbody>" +
+    row("Zysk roczny: strategia", function (s) { return pct(s.cagr, 1, true); }) +
+    row("Zysk roczny: kup i trzymaj", function (s, b) { return pct(b.cagr, 1, true); }) +
+    row("Obsunięcie: strategia", function (s) { return pct(s.maxDD); }) +
+    row("Obsunięcie: kup i trzymaj", function (s, b) { return pct(b.maxDD); }) +
+    row("Transakcje zamknięte", function (s) { return s.trades; }) +
+    row("Zyskownych", function (s) { return pct(s.winRate, 0); }) + "</tbody>";
+
+  var WHY = { stop: "spadek od szczytu", trend: "kurs pod średnią", zysk: "spadek zysku" };
+  var tr = R.trades.slice().reverse(), show = ui.allTrades ? tr : tr.slice(0, 10);
+  $("trades").innerHTML = "<thead><tr><th data-tip='tr-sym'>Spółka</th><th data-tip='tr-buy'>Kupno</th><th data-tip='tr-bpx'>Cena</th><th data-tip='tr-sell'>Sprzedaż</th><th data-tip='tr-spx'>Cena</th><th data-tip='tr-ret'>Wynik</th><th data-tip='tr-why'>Powód</th></tr></thead><tbody>" + show.map(function (t) {
+    return "<tr><td><b data-tip='sym:" + t.s + "'>" + t.s + "</b></td><td class='num'>" + dstr(M.dates[t.entryIdx]) + "</td><td class='num'>" + price(t.entryPx) + "</td><td class='num'>" + (t.open ? "otwarta" : dstr(M.dates[t.exitIdx])) + "</td><td class='num'>" + price(t.exitPx) + "</td><td class='num " + cls(t.ret) + "'>" + pct(t.ret, 1, true) + "</td><td>" + (t.open ? "w portfelu" : WHY[t.why]) + "</td></tr>";
+  }).join("") + (tr.length ? "" : "<tr><td colspan='7'>Brak transakcji przy tych parametrach.</td></tr>") + "</tbody>";
+  $("trades-more").textContent = tr.length > 10 ? (ui.allTrades ? "Pokaż 10 ostatnich" : "Pokaż wszystkie (" + tr.length + ")") : "";
+  $("derived").innerHTML = "Jedna pozycja to <b class='num'>" + pct(R.weight, 1) + "</b> kapitału" + (P.useTrail ? ". Jeśli sprzedasz po spadku o " + P.trail + "% od szczytu, stracisz na niej około <b class='num'>" + pct(R.weight * P.trail / 100, 1) + "</b> kapitału." : ". Bez reguły spadku od szczytu strata na pozycji nie jest z góry ograniczona.") + (P.useRisk && !P.useTrail ? " Wielkość od ryzyka wymaga włączonej reguły spadku od szczytu." : "");
+}
+
+/* ---------- Skaner ---------- */
+var STATUS = { buy: ["good", "▲ Kup"], hold: ["acc", "● Trzymaj"], sell: ["crit", "▼ Sprzedaj"], out: ["mute", "○ Poza"] };
+var CK = { trend: "trend", cross: "średnie", mom: "wzrost kursu", eps: "zysk", growth: "wzrost zysku", pe: "P/E" };
+function renderScanner() {
+  var order = { buy: 0, sell: 1, hold: 2, out: 3 }, rows = SC.slice().sort(function (a, b) { return order[a.status] - order[b.status] || a.s.localeCompare(b.s); });
+  var cnt = { buy: 0, sell: 0, hold: 0, out: 0 }; rows.forEach(function (r) { cnt[r.status]++; });
+  $("scan-title").textContent = "Stan spółek na " + dstr(M.dates[N - 1]);
+  $("scan-counts").innerHTML = ["buy", "sell", "hold", "out"].map(function (k) { return '<span class="pill ' + STATUS[k][0] + '" data-tip="st-' + k + '">' + STATUS[k][1] + " " + cnt[k] + "</span>"; }).join("");
+  $("scan-note").textContent = "Stan wynika z parametrów ustawionych w zakładce Strategia i jest liczony dla każdej spółki osobno, bez limitu pozycji. Kup i Sprzedaj oznaczają sygnał z ostatnich 5 sesji. Sygnały powstają na zamknięciu " + (P.weekly ? "ostatniej sesji tygodnia" : "każdej sesji") + ", a zlecenie zakładam na otwarciu następnej. Skaner nie zna Twoich prawdziwych pozycji: wpisujesz je w zakładce Portfel.";
+  var h = '<div class="srow head"><span data-tip="sc-state">Stan</span><span data-tip="sc-sym">Spółka</span><span class="c" data-tip="c-close">Kurs ($)</span><span class="c" data-tip="c-since">Od zakupu</span><span class="c" data-tip="c-stop">Próg sprzedaży</span><span class="c" data-tip="c-tostop">Zapas do progu</span><span data-tip="c-checks">Warunki kupna</span></div>';
+  rows.forEach(function (r) {
+    var open = ui.openTicker === r.s;
+    h += '<button class="srow" type="button" data-tk="' + r.s + '" aria-expanded="' + open + '"><span><span class="pill ' + STATUS[r.status][0] + '" data-tip="st-' + r.status + '">' + STATUS[r.status][1] + '</span></span><span class="name" data-tip="row"><span class="tk" data-tip="sym:' + r.s + '">' + r.s + '</span> <span class="nm">' + esc(r.n) + "</span></span>" +
+      '<span class="c num" data-tip="c-close"><small>Kurs ($)</small>' + price(r.close) + '</span><span class="c num ' + cls(r.sinceEntry) + '" data-tip="c-since"><small>Od zakupu</small>' + (r.inPos ? pct(r.sinceEntry, 1, true) : "–") + '</span><span class="c num" data-tip="c-stop"><small>Próg sprzedaży</small>' + (r.inPos ? price(r.stop) : "–") + '</span><span class="c num" data-tip="c-tostop"><small>Zapas do progu</small>' + (r.inPos ? (r.toStop >= 0 ? "przekroczony" : pct(-r.toStop, 1)) : "–") + "</span>" +
+      '<span class="checks">' + r.checks.map(function (c) { return '<span class="ck ' + (c[1] ? "ok" : "no") + '" data-tip="ck-' + c[0] + '">' + (c[1] ? "✓ " : "✗ ") + CK[c[0]] + "</span>"; }).join("") + "</span></button>";
+    if (open) h += '<div class="detail" id="detail"></div>';
+  });
+  $("scanlist").innerHTML = h;
+  if (ui.openTicker) renderDetail();
+}
+function renderDetail() {
+  var r = SC.filter(function (x) { return x.s === ui.openTicker; })[0], el = $("detail"); if (!r || !el) return;
+  var T = M.tickers[r.t], I = R.ind[r.t], S = R.signals[r.t];
+  var a = ui.range === "all" ? Math.max(R.start, T.start) : Math.max(R.start, T.start, N - 1 - 252 * 5);
+  var ser = [{ name: "Kurs " + r.s, short: "Kurs", color: "var(--accent)", get: function (i) { return T.c[i]; } }, { name: "Średnia z " + P.smaLong + " sesji", short: "Śr. " + P.smaLong, color: "var(--series-2)", get: function (i) { return I.smaL[i]; } }];
+  if (P.useCross) ser.push({ name: "Średnia z " + P.smaFast + " sesji", short: "Śr. " + P.smaFast, color: "var(--series-3)", get: function (i) { return I.smaF[i]; } });
+  var f = [];
+  if (r.last) f.push("Ostatni sygnał: " + (r.last.type === "buy" ? "kupno" : "sprzedaż") + " z " + dstr(M.dates[r.last.i]) + ".");
+  else f.push("W okresie testu nie było sygnału.");
+  if (isFinite(r.mom)) f.push("Kurs przez " + P.momMonths + " mies.: " + pc(r.mom, 1, true) + ".");
+  if (isFinite(r.vsSma)) f.push("Względem średniej z " + P.smaLong + " sesji: " + pc(r.vsSma, 1, true) + ".");
+  if (isFinite(r.eps)) f.push("Zysk na akcję z 12 mies.: " + nf(r.eps, 2) + " $" + (isFinite(r.growth) && Math.abs(r.growth) < 900 ? " (" + pc(r.growth, 0, true) + " r/r)" : "") + ".");
+  if (isFinite(r.pe)) f.push("P/E: " + nf(r.pe, 1) + ".");
+  el.innerHTML = '<div class="dhead"><div class="legend" style="margin:0" id="d-legend"></div><div class="seg" role="group" aria-label="Zakres wykresu"><button type="button" data-range="5" data-tip="range-5" aria-pressed="' + (ui.range === "5") + '">5 lat</button><button type="button" data-range="all" data-tip="range-all" aria-pressed="' + (ui.range === "all") + '">Cały test</button></div></div><div class="chart" id="d-chart"></div><div class="dfacts">' + f.join(" ") + "</div>";
+  legend($("d-legend"), ser.concat([{ name: "sygnał kupna", glyph: "▲", color: "var(--good)" }, { name: "sygnał sprzedaży", glyph: "▼", color: "var(--crit)" }]));
+  drawChart($("d-chart"), { idx: sample(a, N - 1), h: 290, log: true, series: ser, label: "Kurs " + r.s + " ze średnimi i sygnałami",
+    markers: S.events.map(function (e) { return { i: e.i, y: T.c[e.i], type: e.type }; }), fmt: function (v) { return price(v) + " $"; }, axis: function (v) { return nf(v, v < 10 ? 1 : 0); } });
+}
+
+/* ---------- Portfel: stan, zapis, widok ---------- */
+var ST = { positions: [], cash: 0, fx: 3.91 }, store = { mode: "local", ref: null, busy: false, dirty: false, timer: 0, quiet: false };
+function newId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
+function cleanState(d) {
+  var out = { positions: [], cash: 0, fx: 0, params: null };
+  if (!d || typeof d !== "object") return out;
+  if (Array.isArray(d.positions)) d.positions.slice(0, 200).forEach(function (p) {
+    if (p && typeof p.s === "string" && /^[A-Z0-9.\-]{1,12}$/.test(p.s) && /^\d{4}-\d{2}-\d{2}$/.test(p.date) && p.px > 0 && p.qty > 0)
+      out.positions.push({ id: typeof p.id === "string" ? p.id.slice(0, 24) : newId(), s: p.s, date: p.date, px: +p.px, qty: +p.qty });
+  });
+  if (d.cash >= 0) out.cash = +d.cash;
+  if (d.fx > 0 && d.fx < 100) out.fx = +d.fx;
+  if (d.params && typeof d.params === "object") { out.params = {}; for (var k in E.DEFAULTS) out.params[k] = typeof d.params[k] === typeof E.DEFAULTS[k] ? d.params[k] : E.DEFAULTS[k]; }
+  return out;
+}
+/* ---------- Osoby: osobne portfele i ustawienia w tej przeglądarce, hasło opcjonalne ---------- */
+var PF = { index: [], active: null, key: null, saving: false, dirty: false, timer: 0, quiet: false, ui: {} };
+var subtle = (window.crypto && window.crypto.subtle) || null;
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+function b64(buf) { var b = new Uint8Array(buf), s = ""; for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]); return btoa(s); }
+function unb64(s) { var bin = atob(s), b = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) b[i] = bin.charCodeAt(i); return b; }
+/* hasło → klucz AES-GCM (PBKDF2, SHA-256); portfel z hasłem leży w przeglądarce tylko w postaci zaszyfrowanej */
+function deriveKey(pass, salt) {
+  return subtle.importKey("raw", new TextEncoder().encode(pass), "PBKDF2", false, ["deriveKey"]).then(function (base) {
+    return subtle.deriveKey({ name: "PBKDF2", salt: unb64(salt), iterations: 250000, hash: "SHA-256" }, base, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  });
+}
+function encryptObj(key, obj) {
+  var iv = window.crypto.getRandomValues(new Uint8Array(12));
+  return subtle.encrypt({ name: "AES-GCM", iv: iv }, key, new TextEncoder().encode(JSON.stringify(obj))).then(function (ct) { return { enc: 1, iv: b64(iv), ct: b64(ct) }; });
+}
+function decryptObj(key, rec) { return subtle.decrypt({ name: "AES-GCM", iv: unb64(rec.iv) }, key, unb64(rec.ct)).then(function (pt) { return JSON.parse(new TextDecoder().decode(pt)); }); }
+function loadIndex() {
+  try { var a = JSON.parse(lsGet("ag-osoby") || "[]");
+    PF.index = Array.isArray(a) ? a.filter(function (p) { return p && typeof p.id === "string" && typeof p.name === "string"; }).map(function (p) { return { id: p.id.slice(0, 24), name: p.name.slice(0, 30), salt: typeof p.salt === "string" ? p.salt : null }; }) : [];
+  } catch (e) { PF.index = []; }
+}
+function saveIndex() { lsSet("ag-osoby", JSON.stringify(PF.index)); }
+function snapshot() { return { params: JSON.parse(JSON.stringify(P)), positions: ST.positions.map(function (p) { return { id: p.id, s: p.s, date: p.date, px: p.px, qty: p.qty }; }), cash: ST.cash, fx: ST.fx }; }
+function writeProfile(entry, key, data) {
+  if (key) return encryptObj(key, data).then(function (rec) { lsSet("ag-osoba-" + entry.id, JSON.stringify(rec)); });
+  lsSet("ag-osoba-" + entry.id, JSON.stringify({ enc: 0, data: data })); return Promise.resolve();
+}
+function saveProfile() {
+  if (!PF.active || PF.quiet) return;
+  if (PF.saving) { PF.dirty = true; return; }
+  PF.saving = true;
+  writeProfile(PF.active, PF.key, snapshot()).catch(function () {}).then(function () { PF.saving = false; if (PF.dirty) { PF.dirty = false; saveProfile(); } });
+}
+function persist() { clearTimeout(PF.timer); PF.timer = setTimeout(saveProfile, 250); }
+function setMode() { var el = $("store-note"); if (el) el.textContent = PF.active ? "Portfel: " + PF.active.name + (PF.active.salt ? " (zaszyfrowany hasłem)" : "") : ""; }
+function applyData(d) {
+  var c = cleanState(d); PF.quiet = true;
+  ST.positions = c.positions; ST.cash = c.cash; ST.fx = c.fx || 3.91; P = c.params || Object.assign({}, E.DEFAULTS);
+  ui.editId = null; syncParams(); PF.quiet = false; compute(); renderPeople();
+}
+function openProfile(entry, pass) {
+  var rec = null; try { rec = JSON.parse(lsGet("ag-osoba-" + entry.id) || "null"); } catch (e) {}
+  if (!entry.salt) { PF.active = entry; PF.key = null; lsSet("ag-ostatnia", entry.id); applyData(rec && rec.data); return Promise.resolve(true); }
+  if (!subtle) return Promise.resolve("Ta przeglądarka nie obsługuje szyfrowania, więc nie otworzy portfela z hasłem.");
+  return deriveKey(pass || "", entry.salt).then(function (key) {
+    return (rec && rec.enc ? decryptObj(key, rec) : Promise.resolve(null)).then(function (data) { PF.active = entry; PF.key = key; lsSet("ag-ostatnia", entry.id); applyData(data); return true; });
+  }).catch(function () { return "Błędne hasło."; });
+}
+function lockProfile() {
+  clearTimeout(PF.timer); PF.active = null; PF.key = null; lsDel("ag-ostatnia"); PF.quiet = true;
+  ST.positions = []; ST.cash = 0; ST.fx = 3.91; P = Object.assign({}, E.DEFAULTS); ui.editId = null; syncParams(); PF.quiet = false; compute(); renderPeople();
+}
+function addProfile(name, pass) {
+  name = name.trim().slice(0, 30);
+  if (!name) return Promise.resolve("Podaj imię albo nazwę osoby.");
+  if (PF.index.some(function (p) { return p.name.toLowerCase() === name.toLowerCase(); })) return Promise.resolve("Osoba o takiej nazwie już istnieje.");
+  if (pass && !subtle) return Promise.resolve("Ta przeglądarka nie obsługuje szyfrowania. Dodaj osobę bez hasła.");
+  var entry = { id: newId(), name: name, salt: pass ? b64(window.crypto.getRandomValues(new Uint8Array(16))) : null };
+  var empty = { params: Object.assign({}, E.DEFAULTS), positions: [], cash: 0, fx: ST.fx };
+  return (pass ? deriveKey(pass, entry.salt) : Promise.resolve(null)).then(function (key) {
+    return writeProfile(entry, key, empty).then(function () { PF.index.push(entry); saveIndex(); return true; });
+  }).catch(function () { return "Nie udało się dodać osoby."; });
+}
+function setPassword(pass) {
+  var a = PF.active; if (!a) return Promise.resolve("Najpierw wybierz osobę.");
+  if (!pass) return Promise.resolve("Wpisz nowe hasło.");
+  if (!subtle) return Promise.resolve("Ta przeglądarka nie obsługuje szyfrowania.");
+  var salt = b64(window.crypto.getRandomValues(new Uint8Array(16)));
+  return deriveKey(pass, salt).then(function (key) {
+    return writeProfile(a, key, snapshot()).then(function () { a.salt = salt; PF.key = key; saveIndex(); return true; });
+  }).catch(function () { return "Nie udało się ustawić hasła."; });
+}
+function removePassword() { var a = PF.active; if (!a) return Promise.resolve(true); return writeProfile(a, null, snapshot()).then(function () { a.salt = null; PF.key = null; saveIndex(); return true; }); }
+function renderPeople() {
+  var a = PF.active, u = PF.ui, h = '<div class="dhead" style="margin-bottom:10px"><h2 data-tip="h-people">Osoby</h2><span class="store">' + (a ? (a.salt ? "Portfel zaszyfrowany hasłem" : "Portfel bez hasła") : "") + "</span></div>";
+  h += '<p style="margin:0 0 10px">' + (a ? "Otwarty portfel: <b>" + esc(a.name) + "</b>" : PF.index.length ? "Wybierz osobę, żeby zobaczyć jej portfel i ustawienia." : "Dodaj pierwszą osobę, żeby zacząć.") + "</p>";
+  h += '<div class="people">' + PF.index.map(function (p) { return '<button class="chip" type="button" data-person="' + esc(p.id) + '" data-tip="person" aria-pressed="' + (!!a && a.id === p.id) + '">' + esc(p.name) + (p.salt ? " · hasło" : "") + "</button>"; }).join("") + "</div>";
+  if (u.ask) { var q = PF.index.filter(function (p) { return p.id === u.ask; })[0];
+    if (q) h += '<form class="pf-form" id="pp-loginform" novalidate style="margin-top:12px;max-width:520px"><label for="pp-pass">Hasło osoby ' + esc(q.name) + '<input type="password" id="pp-pass" autocomplete="current-password"></label><button class="chip primary" type="submit">Otwórz portfel</button><button class="chip" type="button" data-pp="cancel">Anuluj</button></form>'; }
+  if (a) h += '<div class="people" style="margin-top:12px"><button class="chip" type="button" data-pp="logout" data-tip="pp-logout">Zamknij portfel</button><button class="chip" type="button" data-pp="edit" data-tip="pp-edit" aria-pressed="' + !!u.edit + '">Zmień nazwę lub hasło</button><button class="chip" type="button" data-pp="del" data-tip="pp-del">Usuń osobę</button></div>';
+  if (a && u.edit) h += '<div class="pf-form" style="margin-top:12px"><label for="pp-name">Nazwa<input type="text" id="pp-name" maxlength="30" autocomplete="off" value="' + esc(a.name) + '"></label><button class="chip" type="button" data-pp="savename">Zapisz nazwę</button><label for="pp-newpass">Nowe hasło<input type="password" id="pp-newpass" autocomplete="new-password"></label><button class="chip" type="button" data-pp="setpass">' + (a.salt ? "Zmień hasło" : "Ustaw hasło") + "</button>" + (a.salt ? '<button class="chip" type="button" data-pp="rmpass">Usuń hasło</button>' : "") + "</div>";
+  if (a && u.del) h += '<div class="alert" style="margin-top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="flex:1 1 220px">Usunąć osobę ' + esc(a.name) + " razem z jej portfelem? Tego nie da się cofnąć.</span><button class=\"chip\" type=\"button\" data-pp=\"delyes\">Tak, usuń</button><button class=\"chip\" type=\"button\" data-pp=\"cancel\">Anuluj</button></div>";
+  h += '<form class="pf-form" id="pp-add" novalidate style="margin-top:16px;max-width:640px"><label for="pp-new" data-tip="pp-new">Nowa osoba<input type="text" id="pp-new" maxlength="30" autocomplete="off"></label><label for="pp-newpw" data-tip="pp-newpw">Hasło (opcjonalnie)<input type="password" id="pp-newpw" autocomplete="new-password"></label><button class="chip primary" type="submit">Dodaj osobę</button></form>';
+  h += '<p class="note" id="pp-msg" role="status">' + esc(u.msg || "") + "</p>";
+  h += '<p class="note">Każda osoba ma własny portfel i własne ustawienia strategii. Dane są zapisane tylko w tej przeglądarce: na innym telefonie lub komputerze trzeba dodać osobę od nowa i wczytać portfel z tekstu. Hasło szyfruje portfel, więc bez niego nie da się go odczytać. Zapomnianego hasła nie można odzyskać.</p>';
+  $("people").innerHTML = h;
+  $("view-portfel").classList.toggle("locked", !a);
+  var who = $("who"); who.textContent = a ? a.name : "Wybierz osobę"; who.setAttribute("aria-label", a ? "Otwarty portfel: " + a.name : "Wybierz osobę");
+  setMode();
+}
+function peopleMsg(m) { PF.ui.msg = m === true ? "" : m; renderPeople(); }
+function initPeople() {
+  loadIndex();
+  if (!PF.index.length) {   // pierwsze uruchomienie: dotychczasowy portfel i ustawienia stają się pierwszą osobą
+    var first = { id: newId(), name: "Mój portfel", salt: null }, legacy = {};
+    try { legacy = JSON.parse(lsGet("pulpit-portfel") || "{}") || {}; } catch (e) { legacy = {}; }
+    try { legacy.params = JSON.parse(lsGet("pulpit-parametry") || "null"); } catch (e) {}
+    PF.index = [first]; saveIndex(); lsSet("ag-osoba-" + first.id, JSON.stringify({ enc: 0, data: legacy })); lsSet("ag-ostatnia", first.id);
+  }
+  var last = lsGet("ag-ostatnia"), entry = PF.index.filter(function (p) { return p.id === last; })[0];
+  if (entry && !entry.salt) openProfile(entry); else { if (entry) PF.ui.ask = entry.id; renderPeople(); }
+  $("who").addEventListener("click", function () { location.hash = "portfel"; route(); $("people").scrollIntoView({ block: "start" }); });
+  $("people").addEventListener("click", function (e) {
+    var per = e.target.closest("[data-person]"), act = e.target.closest("[data-pp]"), u = PF.ui;
+    if (per) {
+      var entry = PF.index.filter(function (p) { return p.id === per.dataset.person; })[0]; if (!entry) return;
+      PF.ui = {}; if (PF.active && PF.active.id === entry.id) { renderPeople(); return; }
+      saveProfile();
+      if (entry.salt) { PF.ui.ask = entry.id; renderPeople(); var pw = $("pp-pass"); if (pw) pw.focus(); }
+      else openProfile(entry);
+      return;
+    }
+    if (!act) return;
+    var k = act.dataset.pp, a = PF.active;
+    if (k === "cancel") { PF.ui = {}; renderPeople(); }
+    else if (k === "logout") { saveProfile(); PF.ui = {}; lockProfile(); }
+    else if (k === "edit") { PF.ui = { edit: !u.edit }; renderPeople(); }
+    else if (k === "del") { PF.ui = { del: true }; renderPeople(); }
+    else if (k === "delyes" && a) { lsDel("ag-osoba-" + a.id); PF.index = PF.index.filter(function (p) { return p.id !== a.id; }); saveIndex(); PF.ui = { msg: "Usunięto osobę " + a.name + "." }; lockProfile(); }
+    else if (k === "savename" && a) {
+      var nm = $("pp-name").value.trim().slice(0, 30);
+      if (!nm) peopleMsg("Podaj nazwę.");
+      else if (PF.index.some(function (p) { return p.id !== a.id && p.name.toLowerCase() === nm.toLowerCase(); })) peopleMsg("Osoba o takiej nazwie już istnieje.");
+      else { a.name = nm; saveIndex(); PF.ui = { edit: true, msg: "Zapisano nazwę." }; renderPeople(); }
+    }
+    else if (k === "setpass" && a) setPassword($("pp-newpass").value).then(function (r) { PF.ui = { edit: r !== true, msg: r === true ? "Hasło ustawione. Portfel jest teraz zaszyfrowany." : r }; renderPeople(); });
+    else if (k === "rmpass" && a) removePassword().then(function () { PF.ui = { msg: "Hasło usunięte." }; renderPeople(); });
+  });
+  $("people").addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (e.target.id === "pp-add") {
+      var nm = $("pp-new").value;
+      addProfile(nm, $("pp-newpw").value).then(function (r) { PF.ui = { msg: r === true ? "Dodano osobę " + nm.trim() + ". Kliknij jej nazwę, żeby otworzyć portfel." : r }; renderPeople(); });
+    } else if (e.target.id === "pp-loginform") {
+      var entry = PF.index.filter(function (p) { return p.id === PF.ui.ask; })[0]; if (!entry) return;
+      openProfile(entry, $("pp-pass").value).then(function (r) { if (r === true) { PF.ui = {}; renderPeople(); } else { PF.ui.msg = r; renderPeople(); var pw = $("pp-pass"); if (pw) pw.focus(); } });
+    }
+  });
+}
+var ACT = { sell: ["crit", "▼ Sprzedaj"], watch: ["warn", "◆ Obserwuj"], buy: ["good", "▲ Kup"], hold: ["acc", "● Trzymaj"], nodata: ["mute", "○ Bez danych"] };
+function shares(x) { return x.toLocaleString("pl-PL", { maximumFractionDigits: 4 }); }
+function renderPortfolio() {
+  if (!R) return;
+  var A = E.actions(M, R, ST), h = "", byType = {}, known = A.items.filter(function (x) { return x.p && x.type !== "nodata"; });
+  A.items.forEach(function (x) { (byType[x.type] = byType[x.type] || []).push(x); });
+  function act(type, what, why) { return '<div class="act"><span class="pill ' + ACT[type][0] + '" data-tip="a-' + type + '">' + ACT[type][1] + '</span><span class="what">' + what + '</span><span class="why">' + why + "</span></div>"; }
+  if (!ST.positions.length) h += '<p style="margin:0">Nie masz jeszcze wpisanych pozycji. Dodaj je poniżej pojedynczo albo wklej cały portfel jako tekst. Do tego czasu lista pokazuje tylko spółki, które reguły kupiłyby teraz.</p><p style="margin:0"><button class="chip primary" type="button" data-goto-io data-tip="io-import">Wklej portfel z tekstu</button></p>';
+  (byType.sell || []).forEach(function (x) {
+    h += act("sell", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · całą pozycję: " + shares(x.p.qty) + " akcji, około " + money(x.value),
+      "Powód: " + E.WHY[x.sig.why] + ". " + (x.fresh ? "Sygnał z zamknięcia " + dstr(M.dates[x.sig.i]) + ", zlecenie na otwarciu najbliższej sesji." : "Zaległy sygnał z " + dstr(M.dates[x.sig.i]) + ": reguły zamknęłyby tę pozycję już wtedy."));
+  });
+  (byType.watch || []).forEach(function (x) {
+    h += act("watch", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · kurs " + price(x.close) + " $ jest poniżej progu sprzedaży " + price(x.stop) + " $", "Reguły oceniają sygnały na zamknięciu ostatniej sesji tygodnia. Do tego czasu nic nie rób.");
+  });
+  (byType.buy || []).forEach(function (x) {
+    var size = !isFinite(x.amount) ? "za " + pct(A.weight, 1) + " kapitału" : x.amount < 1 ? "brak wolnej gotówki na zakup" : "za około " + money(x.amount) + ", czyli około " + nf(x.shares, 2) + " akcji przy kursie " + price(x.close) + " $";
+    h += act("buy", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · " + size, "Spełnia wszystkie warunki kupna" + (x.fresh ? " od ostatniej oceny" : " już od wcześniejszych ocen") + (isFinite(x.mom) ? ". Kurs przez " + P.momMonths + " mies.: " + pc(x.mom, 1, true) : "") + ".");
+  });
+  if (byType.hold) h += act("hold", byType.hold.map(function (x) { return "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b>"; }).join(", "), "Żaden warunek sprzedaży nie zadziałał. Progi sprzedaży są w tabeli poniżej.");
+  if (byType.nodata) h += act("nodata", byType.nodata.map(function (x) { return "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b>"; }).join(", "), "Aplikacja nie ma notowań tych spółek, więc nie liczy dla nich sygnałów, a ich wartość liczy po cenie zakupu.");
+  if (A.waiting) { var few = A.waiting % 10 >= 2 && A.waiting % 10 <= 4 && (A.waiting % 100 < 12 || A.waiting % 100 > 14); h += '<p class="note" style="margin:0">Warunki kupna ' + (A.waiting === 1 ? "spełnia jeszcze 1 spółka" : few ? "spełniają jeszcze " + A.waiting + " spółki" : "spełnia jeszcze " + A.waiting + " spółek") + ", ale limit pozycji (" + P.maxPos + ") jest wyczerpany.</p>"; }
+  $("todo").innerHTML = h;
+  $("todo-note").textContent = "Polecenia wynikają z reguł ustawionych w zakładce Strategia i notowań z " + dstr(M.dates[N - 1]) + ". To wynik Twoich reguł, a nie rekomendacja inwestycyjna.";
+  var pnl = A.value - A.cost;
+  function zl(x) { return ST.fx > 0 ? " <i>(" + nf(Math.round(x * ST.fx), 0) + " zł)</i>" : ""; }
+  $("pf-sum").innerHTML = "<span>Wartość pozycji <b>" + money(A.value) + "</b>" + zl(A.value) + "</span><span>Gotówka <b>" + money(A.cash) + "</b>" + zl(A.cash) + "</span><span data-tip='pf-total'>Razem <b>" + money(A.total) + "</b>" + zl(A.total) + "</span>" +
+    (known.length ? '<span>Wynik otwartych pozycji <b class="' + cls(pnl) + '">' + (pnl > 0 ? "+" : "") + money(pnl).replace("-", "−") + " (" + pct(A.cost > 0 ? pnl / A.cost : 0, 1, true) + ")</b></span>" : "");
+  var rows = A.items.filter(function (x) { return x.p; }).map(function (x) {
+    var nd = x.type === "nodata";
+    return "<tr><td><b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b></td><td class='num'>" + dstr(x.p.date.replace(/-/g, "")) + "</td><td class='num'>" + price(x.p.px) + "</td><td class='num'>" + shares(x.p.qty) + "</td><td class='num'>" + (nd ? "–" : price(x.close)) + "</td><td class='num'>" + money(x.value) +
+      "</td><td class='num " + (nd ? "" : cls(x.ret)) + "'>" + (nd ? "–" : pct(x.ret, 1, true)) + "</td><td class='num'>" + (nd || isNaN(x.stop) ? "–" : price(x.stop)) + "</td><td class='num'>" + (nd || isNaN(x.toStop) ? "–" : x.toStop >= 0 ? "przekroczony" : pct(-x.toStop, 1)) +
+      "</td><td><span class='pill " + ACT[x.type][0] + "' data-tip='a-" + x.type + "'>" + ACT[x.type][1] + "</span></td><td><button class='icon-btn edit' type='button' data-edit='" + esc(x.p.id) + "' data-tip='pf-edit' aria-label='Edytuj pozycję " + esc(x.s) + "'>Edytuj</button> <button class='icon-btn' type='button' data-del='" + esc(x.p.id) + "' data-tip='pf-del' aria-label='Usuń pozycję " + esc(x.s) + "'>Usuń</button></td></tr>";
+  });
+  $("pf-table").innerHTML = "<thead><tr><th data-tip='pt-sym'>Spółka</th><th data-tip='pt-date'>Kupno</th><th data-tip='pt-px'>Cena ($)</th><th data-tip='pt-qty'>Liczba</th><th data-tip='c-close'>Kurs ($)</th><th data-tip='pt-val'>Wartość</th><th data-tip='pt-ret'>Wynik</th><th data-tip='c-stop'>Próg sprzedaży</th><th data-tip='c-tostop'>Zapas do progu</th><th data-tip='pc-state'>Stan</th><th></th></tr></thead><tbody>" +
+    (rows.length ? rows.join("") : "<tr><td colspan='11'>Brak pozycji.</td></tr>") + "</tbody>";
+  var cashEl = $("pf-cash"); if (document.activeElement !== cashEl) cashEl.value = ST.cash || "";
+  var fxEl = $("pf-fx"); if (document.activeElement !== fxEl) fxEl.value = ST.fx || "";
+  setMode();
+}
+function initPortfolio() {
+  $("pf-sym").innerHTML = M.tickers.map(function (t) { return '<option value="' + t.s + '">' + t.s + " · " + esc(t.n) + (t.x ? " (same kursy)" : "") + "</option>"; }).join("") + '<option value="">Inna spółka…</option>';
+  $("pf-sym").addEventListener("change", function () { $("pf-other-wrap").hidden = this.value !== ""; });
+  $("pf-form").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var s = ($("pf-sym").value || $("pf-other").value).trim().toUpperCase(), d = $("pf-date").value, px = +$("pf-px").value, qty = +$("pf-qty").value, err = "";
+    var today = new Date().toISOString().slice(0, 10);
+    if (!/^[A-Z0-9.\-]{1,12}$/.test(s)) err = "Wpisz symbol spółki: litery, cyfry, kropka lub myślnik, najwyżej 12 znaków.";
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(d) || d > today) err = "Podaj datę zakupu, nie późniejszą niż dzisiejsza.";
+    else if (!(px > 0)) err = "Podaj cenę zakupu większą od zera.";
+    else if (!(qty > 0)) err = "Podaj liczbę akcji większą od zera.";
+    $("pf-err").hidden = !err; $("pf-err").textContent = err; if (err) return;
+    if (ui.editId) ST.positions = ST.positions.map(function (p) { return p.id === ui.editId ? { id: p.id, s: s, date: d, px: px, qty: qty } : p; });
+    else ST.positions.push({ id: newId(), s: s, date: d, px: px, qty: qty });
+    endEdit(); persist(); renderPortfolio();
+  });
+  function endEdit() {
+    ui.editId = null; $("pf-px").value = ""; $("pf-qty").value = ""; $("pf-other").value = "";
+    $("pf-form-title").textContent = "Dodaj pozycję"; $("pf-add").textContent = "Dodaj pozycję"; $("pf-cancel").hidden = true; $("pf-err").hidden = true;
+  }
+  $("pf-cancel").addEventListener("click", endEdit);
+  function num(t) { return +String(t).replace(/\s/g, "").replace(",", "."); }
+  $("pf-export").addEventListener("click", function () {
+    var txt = ST.positions.map(function (p) { return [p.s, p.date, p.px, p.qty].join("; "); }).concat(["GOTOWKA; " + (ST.cash || 0), "KURS; " + ST.fx]).join("\n");
+    $("pf-io").value = txt; $("pf-io").select();
+    var msg = "Portfel jest w polu powyżej. Skopiuj go i wklej w aplikacji na drugim urządzeniu.";
+    try { navigator.clipboard.writeText(txt).then(function () { $("pf-io-msg").textContent = "Portfel skopiowany do schowka. Wklej go w aplikacji na drugim urządzeniu."; }, function () {}); } catch (e) {}
+    $("pf-io-msg").textContent = msg;
+  });
+  $("pf-import").addEventListener("click", function () {
+    var lines = $("pf-io").value.split(/\r?\n/), pos = [], cash = null, fx = null, err = "", today = new Date().toISOString().slice(0, 10);
+    lines.forEach(function (ln, k) {
+      if (err || !ln.trim()) return;
+      var f = ln.split(/[;\t]/).map(function (x) { return x.trim(); }), key = f[0].toUpperCase();
+      if (key === "KURS") { var r = num(f[1]); if (!(r > 0 && r < 100)) err = "Wiersz " + (k + 1) + ": podaj kurs dolara w złotych."; else fx = r; return; }
+      if (key === "GOTOWKA" || key === "GOTÓWKA" || key === "CASH") { var c = num(f[1]); if (!(c >= 0)) err = "Wiersz " + (k + 1) + ": podaj kwotę gotówki."; else cash = c; return; }
+      var px = num(f[2]), qty = num(f[3]);
+      if (f.length < 4) err = "Wiersz " + (k + 1) + ": potrzebne są cztery pola rozdzielone średnikami.";
+      else if (!/^[A-Z0-9.\-]{1,12}$/.test(key)) err = "Wiersz " + (k + 1) + ": nieprawidłowy symbol spółki.";
+      else if (!/^\d{4}-\d{2}-\d{2}$/.test(f[1]) || f[1] > today) err = "Wiersz " + (k + 1) + ": data musi mieć postać RRRR-MM-DD i nie może być z przyszłości.";
+      else if (!(px > 0) || !(qty > 0)) err = "Wiersz " + (k + 1) + ": cena i liczba akcji muszą być większe od zera.";
+      else pos.push({ id: newId(), s: key, date: f[1], px: px, qty: qty });
+    });
+    if (!err && !pos.length && cash === null) err = "Pole jest puste. Wklej tekst portfela.";
+    if (err) { $("pf-io-msg").textContent = err + " Nic nie zostało zmienione."; return; }
+    ST.positions = pos; if (cash !== null) ST.cash = cash; if (fx !== null) ST.fx = fx;
+    endEdit(); persist(); renderPortfolio();
+    $("pf-io-msg").textContent = "Wczytano " + pos.length + " " + (pos.length === 1 ? "pozycję" : "pozycji") + (cash !== null ? " i gotówkę" : "") + ". Każdą pozycję możesz poprawić przyciskiem Edytuj.";
+  });
+  $("pf-table").addEventListener("click", function (e) {
+    var ed = e.target.closest("[data-edit]");
+    if (ed) {
+      var p0 = ST.positions.filter(function (p) { return p.id === ed.dataset.edit; })[0]; if (!p0) return;
+      var known = M.tickers.some(function (t) { return t.s === p0.s; });
+      ui.editId = p0.id; $("pf-sym").value = known ? p0.s : ""; $("pf-other-wrap").hidden = known; $("pf-other").value = known ? "" : p0.s;
+      $("pf-date").value = p0.date; $("pf-px").value = p0.px; $("pf-qty").value = p0.qty;
+      $("pf-form-title").textContent = "Edytuj pozycję " + p0.s; $("pf-add").textContent = "Zapisz zmiany"; $("pf-cancel").hidden = false; $("pf-err").hidden = true;
+      hideHint(); $("pf-form").scrollIntoView({ block: "center" }); $("pf-px").focus({ preventScroll: true }); return;
+    }
+    var b = e.target.closest("[data-del]"); if (!b) return;
+    ST.positions = ST.positions.filter(function (p) { return p.id !== b.dataset.del; });
+    if (ui.editId === b.dataset.del) endEdit();
+    hideHint(); persist(); renderPortfolio();
+  });
+  $("pf-cash").addEventListener("input", function () { var v = +this.value; ST.cash = v > 0 ? v : 0; persist(); renderPortfolio(); });
+  $("pf-fx").addEventListener("input", function () { var v = +this.value; if (v > 0 && v < 100) { ST.fx = v; persist(); renderPortfolio(); } });
+  $("todo").addEventListener("click", function (e) { if (e.target.closest("[data-goto-io]")) { $("pf-io").scrollIntoView({ block: "center" }); $("pf-io").focus({ preventScroll: true }); } });
+}
+
+/* ---------- Metoda ---------- */
+function renderMethod() {
+  var buy = [], sell = [];
+  if (P.useTrend) buy.push("kurs zamknięcia jest powyżej średniej z " + P.smaLong + " sesji");
+  if (P.useCross) buy.push("średnia z " + P.smaFast + " sesji jest powyżej średniej z " + P.smaLong + " sesji");
+  if (P.useMom) buy.push("kurs zmienił się przez " + P.momMonths + " mies. o co najmniej " + pc(P.momMin, 0, true));
+  if (P.usePosEps) buy.push("zysk na akcję z ostatnich 12 miesięcy jest dodatni");
+  if (P.useGrowth) buy.push("zysk na akcję zmienił się rok do roku o co najmniej " + pc(P.growthMin, 0, true));
+  if (P.usePe) buy.push("P/E nie przekracza " + P.peMax);
+  if (P.useTrail) sell.push("kurs spadnie o " + P.trail + "% od najwyższego zamknięcia po zakupie");
+  if (P.useTrendExit) sell.push("kurs zamknie się ponad " + P.exitBuffer + "% poniżej średniej z " + P.smaLong + " sesji");
+  if (P.useFundExit) sell.push("zysk na akcję spadnie rok do roku poniżej " + pc(P.growthExit, 0, true));
+  function ul(a, none) { return a.length ? "<ul>" + a.map(function (x) { return "<li>" + x + "</li>"; }).join("") + "</ul>" : "<p>" + none + "</p>"; }
+  $("metoda").innerHTML =
+    '<div class="card"><h2>Twoje reguły słowami</h2><p><b>Kupuję, gdy wszystkie warunki są spełnione:</b></p>' + ul(buy, "Brak warunków kupna.") +
+    '<p style="margin-top:12px"><b>Sprzedaję, gdy spełni się którykolwiek:</b></p>' + ul(sell, "Brak warunków sprzedaży.") +
+    '<p style="margin-top:12px">Sygnały sprawdzam ' + (P.weekly ? "raz w tygodniu, na zamknięciu ostatniej sesji" : "codziennie na zamknięciu") + ". Trzymam najwyżej " + P.maxPos + " pozycji. Gdy kandydatów jest więcej niż wolnych miejsc, wybieram spółki o najsilniejszym wzroście kursu. Po sprzedaży czekam " + P.cooldownWeeks + " tyg. przed ponownym zakupem tej samej spółki.</p></div>" +
+    '<div class="card"><h2>Jak liczony jest test</h2><ul>' +
+    "<li>Sygnał powstaje na zamknięciu sesji, a transakcja jest liczona po cenie otwarcia następnej sesji.</li>" +
+    "<li>Każda transakcja jest obciążona kosztem " + nf(P.cost, 2) + "% wartości. Akcje ułamkowe są dozwolone.</li>" +
+    "<li>Zysk na akcję z danego kwartału jest używany dopiero 60 dni po końcu kwartału, żeby test nie znał wyników przed ich publikacją.</li>" +
+    "<li>Kup i trzymaj oznacza równe udziały we wszystkich spółkach z listy, wyrównywane codziennie, bez kosztów.</li>" +
+    "<li>Silnik został sprawdzony niezależnym przeliczeniem w drugim programie: kapitał końcowy i lista transakcji zgadzają się co do centa.</li></ul></div>" +
+    '<div class="card"><h2>Ograniczenia, które zawyżają wyniki</h2><ul>' +
+    "<li><b>Lista spółek to dzisiejsi zwycięzcy.</b> " + UNI.length + " spółek wybrano dlatego, że są dziś duże i popularne. Spółki, które po drodze upadły lub zmalały, nie są na liście. Wyniki bezwzględne są przez to zawyżone, więc oceniaj strategię po porównaniu z kup i trzymaj, a nie po samym zysku.</li>" +
+    "<li><b>Mała i jednorodna próba.</b> Prawie wszystkie spółki to technologia z USA. Reguły, które działają tutaj, mogą nie działać na bankach, surowcach albo GPW.</li>" +
+    "<li><b>Brak podatku i przewalutowania.</b> Test nie odejmuje podatku od zysków ani kosztu wymiany PLN na USD. Koszt wymiany możesz doliczyć do kosztu transakcji.</li>" +
+    "<li><b>Ceny.</b> Notowania są skorygowane o splity. Źródło nie podaje, czy uwzględnia dywidendy.</li></ul></div>" +
+    '<div class="card"><h2>Dane</h2><p>Notowania dzienne i zysk na akcję: ' + esc(M.source) + ", stan na " + dstr(M.dates[N - 1]) + ". Notowania odświeża automat GitHuba od wtorku do soboty rano, po sesji w USA. Listę dodatkowych spółek ustawia się w pliku tickers.json w repozytorium. Spółki w teście i Skanerze: " + UNI.map(function (t) { return t.s; }).join(", ") + "." + (XTR.length ? " Dla Portfela aplikacja ma też same kursy, bez danych o zysku: " + XTR.map(function (t) { return t.s; }).join(", ") + ". Te spółki nie biorą udziału w teście ani w Skanerze, a w Portfelu działają dla nich tylko reguły sprzedaży oparte na kursie." : "") + "</p><p style=\"margin-top:8px\">To narzędzie sprawdza reguły na danych historycznych. Nie jest rekomendacją inwestycyjną, a wyniki z przeszłości nie gwarantują przyszłych.</p></div>";
+}
+
+/* ---------- podpowiedzi (najwyżej dwa zdania na funkcję) ---------- */
+var TIPS = {
+  "nav-strategia": "Tu ustawiasz reguły kupna i sprzedaży i od razu widzisz, jak sprawdziłyby się w przeszłości.",
+  "nav-skaner": "Pokazuje, co Twoje reguły mówią dziś o każdej spółce: kupić, trzymać, sprzedać czy czekać.",
+  "nav-metoda": "Twoje reguły zapisane zwykłymi zdaniami oraz założenia i ograniczenia testu.",
+  "nav-portfel": "Tu wpisujesz swoje prawdziwe pozycje, a aplikacja mówi, co zrobić z każdą z nich według Twoich reguł.",
+  "h-todo": "Lista konkretnych poleceń na dziś: co sprzedać, co kupić i co trzymać. Wynika z reguł ze Strategii zastosowanych do Twoich pozycji.",
+  "h-pos": "Twoje pozycje z bieżącą wyceną, wynikiem i progiem, przy którym reguły każą sprzedać.",
+  "h-add": "Dodaje pozycję do portfela. Podaj dane z potwierdzenia transakcji u brokera.",
+  "pf-sym": "Spółka, którą kupiłeś. Dla spółek spoza listy aplikacja zapisze pozycję, ale nie policzy dla niej sygnałów.",
+  "pf-date": "Dzień zakupu. Od tej daty aplikacja śledzi najwyższy kurs, od którego liczy dopuszczalny spadek.",
+  "pf-px": "Cena jednej akcji w dolarach, po której kupiłeś.",
+  "pf-qty": "Liczba kupionych akcji, może być ułamkowa.",
+  "pf-del": "Usuwa pozycję z portfela, na przykład po jej sprzedaży.",
+  cash: "Gotówka w dolarach czekająca na rachunku. Aplikacja używa jej do wyliczenia kwot zakupu.",
+  fx: "Kurs służy tylko do pokazania wartości portfela w złotych. Wpisz aktualny kurs ze swojego rachunku albo z NBP.",
+  "pf-total": "Wartość wszystkich pozycji razem z wolną gotówką. Kwota w nawiasie to przeliczenie na złote po wpisanym kursie.",
+  store: "Pokazuje, czyj portfel jest otwarty i czy jest zaszyfrowany hasłem.",
+  who: "Pokazuje, czyj portfel jest otwarty. Kliknij, żeby przejść do listy osób.",
+  "h-people": "Każda osoba ma własny portfel i własne ustawienia strategii. Inne osoby korzystające z tej przeglądarki nie zobaczą portfela chronionego hasłem.",
+  person: "Otwiera portfel tej osoby. Jeśli ma hasło, aplikacja o nie zapyta.",
+  "pp-logout": "Zamyka otwarty portfel i wraca do wyboru osoby.",
+  "pp-edit": "Pozwala zmienić nazwę osoby oraz ustawić, zmienić albo usunąć hasło.",
+  "pp-del": "Usuwa osobę razem z jej portfelem i ustawieniami z tej przeglądarki.",
+  "pp-new": "Imię albo nazwa, pod którą osoba będzie widoczna na liście.",
+  "pp-newpw": "Hasło jest opcjonalne. Jeśli je podasz, portfel tej osoby będzie zaszyfrowany i nie da się go otworzyć bez hasła.",
+  "pc-state": "Stan pozycji według Twoich reguł: trzymaj, sprzedaj, obserwuj albo bez danych.",
+  "a-sell": "Zadziałał warunek sprzedaży. Według reguł pozycję zamyka się w całości na otwarciu najbliższej sesji.",
+  "a-buy": "Spółka spełnia wszystkie warunki kupna i masz wolne miejsce w portfelu. Kwota wynika z wielkości pozycji ustawionej w Strategii.",
+  "a-watch": "Kurs jest poniżej progu sprzedaży, ale reguły oceniają sygnały dopiero na koniec tygodnia. Do tego czasu pozycja zostaje.",
+  "a-hold": "Żaden warunek sprzedaży nie zadziałał, więc pozycja zostaje.",
+  "a-nodata": "Aplikacja nie ma notowań tej spółki, więc nie liczy dla niej sygnałów. Wartość pozycji jest liczona po cenie zakupu.",
+  "pf-edit": "Wczytuje pozycję do formularza, żeby poprawić spółkę, datę, cenę albo liczbę akcji.",
+  "h-io": "Zapisuje cały portfel jako tekst albo wczytuje go z tekstu. Przydaje się do przeniesienia portfela między telefonem a komputerem.",
+  "io-export": "Wypisuje Twoje pozycje i gotówkę w polu tekstowym i kopiuje je do schowka.",
+  "io-import": "Zastępuje obecny portfel pozycjami z pola tekstowego. Każdy wiersz to: symbol; data zakupu; cena; liczba akcji.",
+  "nav-instrukcja": "Opis wszystkich funkcji aplikacji i kolejność pracy krok po kroku.",
+  "preset:Trend i zysk": "Zestaw wyjściowy: kupuje spółki w trendzie wzrostowym z rosnącym zyskiem. Trzyma do 5 pozycji i sprzedaje po spadku o 25% od szczytu.",
+  "preset:Ostrożny": "Więcej mniejszych pozycji, sprzedaż już po spadku o 15% od szczytu i ostrzejsze warunki kupna. Mniejsze wahania kosztem zysku.",
+  "preset:Agresywny": "Tylko 3 duże pozycje, sprzedaż dopiero po spadku o 35% od szczytu i brak filtrów wyników spółki. Większy potencjał i większe obsunięcia.",
+  reset: "Przywraca wszystkie parametry do ustawień początkowych.",
+  useTrend: "Kupuje tylko wtedy, gdy kurs jest powyżej swojej średniej z wielu sesji, czyli w trendzie wzrostowym. To podstawowy filtr chroniący przed kupowaniem spadających spółek.",
+  smaLong: "Liczba sesji, z których liczona jest średnia długoterminowa. Dłuższa średnia daje mniej sygnałów i wolniej reaguje na zmianę trendu.",
+  useCross: "Dodatkowe potwierdzenie trendu: średnia z krótszego okresu musi być powyżej długoterminowej. Odsiewa krótkie odbicia w trendzie spadkowym.",
+  smaFast: "Liczba sesji średniej szybkiej. Krótsza reaguje szybciej, ale częściej daje fałszywe sygnały.",
+  useMom: "Wymaga, żeby kurs wzrósł w wybranym okresie. Gdy kandydatów jest za dużo, pierwszeństwo mają spółki o najsilniejszym wzroście.",
+  momMonths: "Okres, za który mierzony jest wzrost kursu.",
+  momMin: "Najmniejszy wzrost kursu w tym okresie, przy którym spółka może zostać kupiona.",
+  usePosEps: "Odrzuca spółki, które w ostatnich 12 miesiącach miały stratę.",
+  useGrowth: "Kupuje tylko spółki, których zysk na akcję jest wyższy niż rok wcześniej.",
+  growthMin: "Najmniejszy roczny wzrost zysku na akcję wymagany do zakupu.",
+  usePe: "Odrzuca spółki zbyt drogie względem zysku. P/E mówi, ile dolarów płacisz za dolara rocznego zysku spółki.",
+  peMax: "Najwyższe P/E, przy którym spółka może zostać kupiona.",
+  useTrendExit: "Sprzedaje, gdy kurs spadnie pod średnią długoterminową, czyli gdy trend wzrostowy się załamuje.",
+  exitBuffer: "O ile procent kurs musi zejść pod średnią, żeby powstał sygnał sprzedaży. Margines ogranicza sprzedaż przy chwilowym naruszeniu średniej.",
+  useTrail: "Sprzedaje, gdy kurs spadnie o ustalony procent od najwyższego poziomu po zakupie. Próg sprzedaży rośnie razem z kursem i nigdy się nie obniża.",
+  trail: "Wielkość spadku od szczytu, po której pozycja jest zamykana. Mały spadek tnie straty szybciej, ale częściej wyrzuca z dobrych pozycji.",
+  useFundExit: "Sprzedaje, gdy zysk na akcję spada rok do roku poniżej progu, nawet jeśli kurs jeszcze trzyma trend.",
+  growthExit: "Roczna zmiana zysku na akcję, poniżej której pozycja jest zamykana.",
+  cooldownWeeks: "Liczba tygodni po sprzedaży, w których ta sama spółka nie może zostać ponownie kupiona. Ogranicza serię strat w niezdecydowanym rynku.",
+  capital: "Kwota, od której startuje test. Nie wpływa na wyniki procentowe, tylko na kwoty w dolarach.",
+  maxPos: "Największa liczba spółek trzymanych jednocześnie. Mniej pozycji to większe pojedyncze zakłady i większe wahania.",
+  useRisk: "Dobiera wielkość pozycji tak, żeby sprzedaż po dopuszczalnym spadku kosztowała ustalony procent kapitału. Wymaga włączonej reguły spadku od szczytu.",
+  riskPct: "Jaką część kapitału możesz stracić na jednej pozycji, gdy zadziała reguła spadku od szczytu.",
+  cost: "Procent wartości odejmowany przy każdym kupnie i sprzedaży. Wpisz tu prowizję brokera, poślizg ceny i ewentualny koszt wymiany walut.",
+  weekly: "Włączone: reguły są sprawdzane na koniec tygodnia, co daje mniej transakcji i mniej szumu. Wyłączone: reguły są sprawdzane po każdej sesji.",
+  derived: "Pokazuje, jaką część kapitału zajmuje jedna pozycja i ile możesz na niej stracić przy obecnych ustawieniach.",
+  startYear: "Rok, od którego liczony jest test. Start w 2008 obejmuje krach, więc pokazuje zachowanie strategii w bessie.",
+  splitYear: "Dzieli test na dwie części: do tego roku dobierasz parametry, a późniejsze lata służą do sprawdzenia. Przerywana linia na wykresach pokazuje tę granicę.",
+  verdict: "Krótka ocena: porównuje zysk i najgłębsze obsunięcie strategii z samym trzymaniem tych samych spółek.",
+  gauge: "Najgłębszy spadek kapitału od szczytu do dołka w całym teście. To miara tego, ile trzeba było wytrzymać po drodze.",
+  "t-cagr": "Średni roczny wzrost kapitału w całym teście, z uwzględnieniem kosztów.",
+  "t-final": "Kwota, do której urósłby kapitał początkowy na koniec testu.",
+  "t-mar": "Zysk roczny podzielony przez najgłębsze obsunięcie. Im wyżej, tym więcej zysku za każdą jednostkę ryzyka.",
+  "t-trades": "Liczba zakończonych transakcji i odsetek tych, które przyniosły zysk. Strategie trendowe często zarabiają mimo trafności poniżej 50%.",
+  "t-pf": "Suma zysków z zyskownych transakcji podzielona przez sumę strat ze stratnych. Powyżej 1 strategia zarabia.",
+  "t-expo": "Jaką część czasu kapitał był średnio ulokowany w akcjach. Reszta to gotówka czekająca na sygnał.",
+  "h-eq": "Wartość portfela dzień po dniu dla strategii i dla samego trzymania spółek. Najedź na wykres, żeby odczytać wartości z wybranego dnia.",
+  "h-dd": "Pokazuje, o ile procent kapitał był w danym dniu poniżej swojego wcześniejszego szczytu. Głębokie i długie doły to okresy, które najtrudniej wytrzymać.",
+  "h-periods": "Te same miary policzone osobno dla okresu dopasowania i okresu sprawdzianu. Jeśli strategia działa tylko w pierwszym, jest przeuczona.",
+  "col-all": "Wyniki z całego zakresu testu.",
+  "col-ins": "Okres, na który patrzysz, dobierając parametry.",
+  "col-oos": "Okres, pod który parametry nie były strojone. To uczciwszy obraz tego, czego można się spodziewać.",
+  "h-trades": "Lista transakcji z testu, od najnowszych. Powód mówi, która reguła zamknęła pozycję.",
+  "trades-more": "Przełącza między 10 ostatnimi transakcjami a pełną listą.",
+  "st-buy": "Sygnał kupna z ostatnich 5 sesji: spółka właśnie spełniła wszystkie warunki kupna.",
+  "st-hold": "Spółka dostała wcześniej sygnał kupna i żaden warunek sprzedaży jeszcze nie zadziałał.",
+  "st-sell": "Sygnał sprzedaży z ostatnich 5 sesji: zadziałał jeden z warunków sprzedaży.",
+  "st-out": "Brak pozycji: spółka nie spełnia teraz warunków kupna albo trwa przerwa po sprzedaży.",
+  "c-close": "Ostatni kurs zamknięcia w dolarach.",
+  "c-since": "Zmiana kursu od ceny, po której zostałby wykonany zakup po ostatnim sygnale kupna.",
+  "c-stop": "Kurs, przy którym Twoje reguły każą sprzedać. To wyższa z dwóch wartości: kurs po dopuszczalnym spadku od szczytu albo średnia długoterminowa pomniejszona o margines.",
+  "c-tostop": "O ile procent kurs może jeszcze spaść, zanim dojdzie do progu sprzedaży. Słowo „przekroczony” oznacza, że kurs już jest poniżej progu.",
+  "pt-sym": "Symbol giełdowy spółki, na przykład AAPL to Apple.",
+  "pt-date": "Data zakupu. Od niej aplikacja śledzi najwyższy kurs, od którego liczy dopuszczalny spadek.",
+  "pt-px": "Cena jednej akcji w dolarach, po której kupiłeś.",
+  "pt-qty": "Liczba posiadanych akcji, może być ułamkowa.",
+  "pt-val": "Liczba akcji razy ostatni kurs, czyli obecna wartość pozycji. Dla spółki bez notowań liczona po cenie zakupu.",
+  "pt-ret": "Zmiana kursu względem Twojej ceny zakupu w procentach.",
+  "tr-sym": "Spółka, której dotyczyła transakcja w teście.",
+  "tr-buy": "Dzień, w którym test kupił akcje.",
+  "tr-bpx": "Cena otwarcia w dniu kupna, po której test liczy zakup.",
+  "tr-sell": "Dzień sprzedaży. Słowo „otwarta” oznacza pozycję trzymaną do końca testu.",
+  "tr-spx": "Cena otwarcia w dniu sprzedaży, a dla otwartej pozycji ostatni kurs.",
+  "tr-ret": "Zysk lub strata na transakcji w procentach, po odjęciu kosztów.",
+  "tr-why": "Reguła, która zamknęła pozycję: spadek od szczytu, kurs pod średnią albo spadek zysku spółki.",
+  "sc-state": "Stan spółki według Twoich reguł: Kup, Trzymaj, Sprzedaj albo Poza.",
+  "sc-sym": "Symbol i nazwa spółki. Kliknij wiersz, żeby zobaczyć wykres z sygnałami.",
+  "c-checks": "Warunki kupna włączone w Strategii. Ptaszek oznacza warunek spełniony, a krzyżyk z przekreśleniem niespełniony.",
+  "ck-trend": "Czy kurs jest powyżej średniej długoterminowej.",
+  "ck-cross": "Czy średnia szybka jest powyżej długoterminowej.",
+  "ck-mom": "Czy kurs wzrósł w wybranym okresie o wymagany procent.",
+  "ck-eps": "Czy spółka ma dodatni zysk na akcję z 12 miesięcy.",
+  "ck-growth": "Czy zysk na akcję wzrósł rok do roku o wymagany procent.",
+  "ck-pe": "Czy P/E mieści się w ustawionym limicie.",
+  row: "Kliknij spółkę, żeby rozwinąć wykres kursu ze średnimi i zaznaczonymi sygnałami.",
+  "range-5": "Pokazuje na wykresie ostatnie 5 lat.",
+  "range-all": "Pokazuje na wykresie cały zakres testu.",
+  tour: "Uruchamia samouczek, który krok po kroku pokazuje najważniejsze miejsca aplikacji."
+};
+var NAMES2 = { V: "Visa", MA: "Mastercard", GOOGL: "Alphabet", AMD: "AMD", INTC: "Intel", ORCL: "Oracle", UBER: "Uber", JPM: "JPMorgan Chase", BAC: "Bank of America", KO: "Coca-Cola", PEP: "PepsiCo", DIS: "Disney", NKE: "Nike", PYPL: "PayPal", COIN: "Coinbase", BABA: "Alibaba", "BRK.B": "Berkshire Hathaway", JNJ: "Johnson & Johnson", PFE: "Pfizer", XOM: "ExxonMobil", WMT: "Walmart", COST: "Costco", MCD: "McDonald's", BA: "Boeing", IBM: "IBM", CSCO: "Cisco", QCOM: "Qualcomm", ASML: "ASML", SHOP: "Shopify", SPOT: "Spotify", ABNB: "Airbnb", SNOW: "Snowflake", CRWD: "CrowdStrike", RKLB: "Rocket Lab", SOFI: "SoFi", HOOD: "Robinhood", PKN: "Orlen", PKO: "PKO Bank Polski", PZU: "PZU", CDR: "CD Projekt", KGH: "KGHM", ALE: "Allegro", LPP: "LPP", DNP: "Dino Polska", PEO: "Bank Pekao", XTB: "XTB" };
+function symName(s) {
+  var t = M.tickers.filter(function (x) { return x.s === s; })[0];
+  return t ? t.n + " (" + s + ")" : NAMES2[s] ? NAMES2[s] + " (" + s + ")" : "Aplikacja nie zna pełnej nazwy spółki o symbolu " + s + ".";
+}
+var hint = $("hint"), hintFor = null;
+function hideHint() { hint.hidden = true; hintFor = null; }
+function showHint(el) {
+  var key = el.getAttribute("data-tip"), t = key.indexOf("sym:") === 0 ? symName(key.slice(4)) : TIPS[key]; if (!t) { hideHint(); return; }
+  hint.textContent = t; hint.hidden = false; hintFor = el;
+  var r = el.getBoundingClientRect(), w = hint.offsetWidth, h = hint.offsetHeight;
+  var x = Math.min(Math.max(8, r.left), window.innerWidth - w - 8), y = r.bottom + 8;
+  if (y + h > window.innerHeight - 8) y = Math.max(8, r.top - h - 8);
+  hint.style.left = x + "px"; hint.style.top = y + "px";
+}
+function hintTarget(e) { return e.target && e.target.closest ? e.target.closest("[data-tip]") : null; }
+document.addEventListener("mousemove", function (e) { var el = hintTarget(e); if (!el) { if (hintFor) hideHint(); } else if (el !== hintFor) showHint(el); });
+document.addEventListener("focusin", function (e) { var el = hintTarget(e); if (el) showHint(el); });
+document.addEventListener("focusout", hideHint);
+document.addEventListener("mouseleave", hideHint);
+window.addEventListener("scroll", hideHint, true);
+
+/* ---------- Instrukcja ---------- */
+function renderInstruction() {
+  function rows(list) { return list.map(function (p) { return "<tr><td>" + p[0] + "</td><td>" + TIPS[p[1]] + "</td></tr>"; }).join(""); }
+  var params = "";
+  SCHEMA.forEach(function (g) {
+    params += '<tr><th colspan="2">' + g.t + "</th></tr>";
+    g.items.forEach(function (it) {
+      if (it.d) return;
+      if (it.n) { params += rows([[it.l, it.n]]); return; }
+      if (it.k) params += rows([[it.l, it.k]]);
+      (it.s || []).forEach(function (s) { params += rows([[s.l, s.k]]); });
+    });
+  });
+  $("instrukcja").innerHTML =
+    '<div class="card"><h2>Do czego służy aplikacja</h2><p>Analizator giełdy sprawdza Twoje reguły kupna i sprzedaży na danych historycznych, a potem stosuje je do aktualnych notowań. Nie przewiduje kursów. Pilnuje, żeby decyzje wynikały z reguł, które wcześniej przetestowałeś.</p>' +
+    '<p style="margin-top:8px">Każdy element ma krótką podpowiedź. Na komputerze najedź na niego myszką, a na telefonie go dotknij.</p><p style="margin-top:12px"><button class="chip primary" type="button" data-tour-start data-tip="tour">Uruchom samouczek</button></p></div>' +
+    '<div class="card"><h2>Kolejność pracy</h2><ol>' +
+    "<li>W zakładce Strategia wybierz gotowy zestaw albo ustaw własne warunki kupna i sprzedaży.</li>" +
+    "<li>Przeczytaj werdykt i porównaj zysk roczny oraz obsunięcie strategii z samym trzymaniem spółek.</li>" +
+    "<li>Zmieniaj po jednym parametrze i obserwuj wynik. Jeśli mała zmiana parametru mocno zmienia wynik, reguła jest niestabilna.</li>" +
+    "<li>Sprawdź tabelę Dopasowanie a sprawdzian. Strategii można ufać dopiero wtedy, gdy broni się także w okresie sprawdzianu.</li>" +
+    "<li>Przejdź do Skanera i zobacz, co reguły mówią dziś o każdej spółce.</li>" +
+    "<li>W zakładce Portfel wpisz swoje pozycje i wolną gotówkę. Lista Do zrobienia pokaże, co sprzedać, co kupić i co trzymać.</li>" +
+    "<li>W zakładce Metoda przeczytaj reguły zapisane słowami i ograniczenia testu, zanim użyjesz sygnałów na prawdziwych pieniądzach.</li></ol></div>" +
+    '<div class="card"><h2>Zakładki</h2><div class="scroll"><table class="ptab">' + rows([["Strategia", "nav-strategia"], ["Skaner", "nav-skaner"], ["Portfel", "nav-portfel"], ["Metoda", "nav-metoda"], ["Instrukcja", "nav-instrukcja"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Strategia: gotowe zestawy</h2><div class="scroll"><table class="ptab">' + rows([["Trend i zysk", "preset:Trend i zysk"], ["Ostrożny", "preset:Ostrożny"], ["Agresywny", "preset:Agresywny"], ["Przywróć domyślne", "reset"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Strategia: parametry</h2><div class="scroll"><table class="ptab">' + params + rows([["Podsumowanie pozycji", "derived"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Strategia: wyniki</h2><div class="scroll"><table class="ptab">' + rows([["Werdykt", "verdict"], ["Najgłębsze obsunięcie kapitału", "gauge"], ["Zysk roczny", "t-cagr"], ["Kapitał końcowy", "t-final"], ["Zysk roczny do obsunięcia", "t-mar"], ["Transakcje zamknięte", "t-trades"], ["Zysk do strat", "t-pf"], ["Czas w rynku", "t-expo"], ["Wykres: kapitał w czasie", "h-eq"], ["Wykres: obsunięcie kapitału", "h-dd"], ["Tabela: dopasowanie a sprawdzian", "h-periods"], ["Kolumna Dopasowanie", "col-ins"], ["Kolumna Sprawdzian", "col-oos"], ["Tabela: transakcje", "h-trades"], ["Transakcje: Kupno", "tr-buy"], ["Transakcje: Sprzedaż", "tr-sell"], ["Transakcje: Wynik", "tr-ret"], ["Transakcje: Powód", "tr-why"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Skaner</h2><div class="scroll"><table class="ptab">' +
+    '<tr><th colspan="2">Stany spółki</th></tr>' + rows([["▲ Kup", "st-buy"], ["● Trzymaj", "st-hold"], ["▼ Sprzedaj", "st-sell"], ["○ Poza", "st-out"]]) +
+    '<tr><th colspan="2">Kolumny</th></tr>' + rows([["Kurs ($)", "c-close"], ["Od zakupu", "c-since"], ["Próg sprzedaży", "c-stop"], ["Zapas do progu", "c-tostop"], ["Warunki kupna", "c-checks"]]) +
+    '<tr><th colspan="2">Wykres spółki</th></tr>' + rows([["Rozwinięcie wiersza", "row"], ["5 lat", "range-5"], ["Cały test", "range-all"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Portfel</h2><p style="margin-bottom:10px">Kapitał początkowy w Strategii służy tylko do testu na danych historycznych. Prawdziwe pozycje i gotówkę wpisujesz w Portfelu, a notowania odświeżają się automatycznie po każdej sesji w USA.</p><div class="scroll"><table class="ptab">' +
+    '<tr><th colspan="2">Do zrobienia</th></tr>' + rows([["Lista poleceń", "h-todo"], ["▼ Sprzedaj", "a-sell"], ["▲ Kup", "a-buy"], ["◆ Obserwuj", "a-watch"], ["● Trzymaj", "a-hold"], ["○ Bez danych", "a-nodata"]]) +
+    '<tr><th colspan="2">Pozycje</th></tr>' + rows([["Tabela pozycji", "h-pos"], ["Spółka", "pt-sym"], ["Kupno", "pt-date"], ["Cena ($)", "pt-px"], ["Liczba", "pt-qty"], ["Kurs ($)", "c-close"], ["Wartość", "pt-val"], ["Wynik", "pt-ret"], ["Próg sprzedaży", "c-stop"], ["Zapas do progu", "c-tostop"], ["Stan", "pc-state"], ["Edytuj", "pf-edit"], ["Usuń", "pf-del"]]) +
+    '<tr><th colspan="2">Dodawanie</th></tr>' + rows([["Spółka", "pf-sym"], ["Data zakupu", "pf-date"], ["Cena zakupu", "pf-px"], ["Liczba akcji", "pf-qty"], ["Wolna gotówka", "cash"], ["Kurs dolara", "fx"], ["Razem", "pf-total"], ["Miejsce zapisu", "store"]]) +
+    '<tr><th colspan="2">Przenoszenie</th></tr>' + rows([["Portfel jako tekst", "h-io"], ["Pokaż mój portfel jako tekst", "io-export"], ["Wczytaj portfel z tekstu", "io-import"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Osoby</h2><p style="margin-bottom:10px">Z aplikacji może korzystać kilka osób na jednym urządzeniu. Każda ma własny portfel i własne ustawienia, a dane są zapisane tylko w tej przeglądarce.</p><div class="scroll"><table class="ptab">' +
+    rows([["Lista osób", "h-people"], ["Przycisk z nazwą osoby", "person"], ["Nowa osoba", "pp-new"], ["Hasło (opcjonalnie)", "pp-newpw"], ["Zamknij portfel", "pp-logout"], ["Zmień nazwę lub hasło", "pp-edit"], ["Usuń osobę", "pp-del"], ["Przycisk w nagłówku", "who"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Słowniczek</h2><div class="scroll"><table class="ptab">' +
+    "<tr><td>Średnia krocząca</td><td>Średni kurs zamknięcia z ostatnich sesji, liczony na nowo każdego dnia. Wygładza wahania i pokazuje kierunek trendu.</td></tr>" +
+    "<tr><td>Obsunięcie kapitału</td><td>Spadek wartości portfela od najwyższego dotychczasowego poziomu. Najgłębsze obsunięcie to największy taki spadek w całym teście.</td></tr>" +
+    "<tr><td>Próg sprzedaży</td><td>Kurs, przy którym Twoje reguły każą sprzedać akcje. Dopóki kurs jest wyżej, pozycja zostaje.</td></tr>" +
+    "<tr><td>Spadek od szczytu (stop kroczący)</td><td>Reguła sprzedaży: sprzedajesz, gdy kurs spadnie o ustalony procent od najwyższego poziomu po zakupie. „Stop” to w giełdowym żargonie próg, po którego przekroczeniu zamyka się pozycję, żeby zatrzymać stratę.</td></tr>" +
+    "<tr><td>Zysk na akcję</td><td>Zysk netto spółki z ostatnich 12 miesięcy podzielony przez liczbę akcji.</td></tr>" +
+    "<tr><td>P/E</td><td>Kurs akcji podzielony przez zysk na akcję. Wysokie P/E oznacza, że rynek płaci dużo za obecne zyski, zwykle licząc na ich wzrost.</td></tr>" +
+    "<tr><td>Kup i trzymaj</td><td>Punkt odniesienia: równe udziały we wszystkich spółkach z listy, bez żadnych sygnałów. Strategia ma sens, jeśli daje lepszy zysk albo wyraźnie mniejsze ryzyko niż ten punkt.</td></tr>" +
+    "<tr><td>Przeuczenie</td><td>Dopasowanie parametrów tak dokładnie do przeszłości, że reguły przestają działać na nowych danych. Chroni przed nim okres sprawdzianu.</td></tr>" +
+    "<tr><td>Poślizg</td><td>Różnica między ceną, po której chciałeś kupić lub sprzedać, a ceną faktycznej transakcji.</td></tr>" +
+    "</table></div></div>";
+}
+
+/* ---------- nawigacja i start ---------- */
+var VIEWS = ["strategia", "skaner", "portfel", "metoda", "instrukcja"];
+function route() {
+  var v = (location.hash || "#strategia").slice(1); if (VIEWS.indexOf(v) < 0) v = "strategia";
+  VIEWS.forEach(function (n) { $("view-" + n).hidden = n !== v; if (n === v) $("nav-" + n).setAttribute("aria-current", "page"); else $("nav-" + n).removeAttribute("aria-current"); });
+  $("mini").style.display = v === "strategia" ? "" : "none";
+  if (R) { if (v === "strategia") renderStrategy(); if (v === "skaner") renderScanner(); }
+}
+$("asof").textContent = "Notowania do " + dstr(M.dates[N - 1]) + " · " + UNI.length + " popularnych spółek z USA";
+buildParams(); syncParams(); renderInstruction(); initPortfolio(); compute(); route(); initPeople();
+window.addEventListener("hashchange", route);
+$("trades-more").addEventListener("click", function () { ui.allTrades = !ui.allTrades; renderStrategy(); });
+$("scanlist").addEventListener("click", function (e) {
+  var rg = e.target.closest("[data-range]"); if (rg) { ui.range = rg.dataset.range; renderDetail(); return; }
+  var b = e.target.closest("[data-tk]"); if (b) { ui.openTicker = ui.openTicker === b.dataset.tk ? null : b.dataset.tk; renderScanner(); }
+});
+var rz = 0, lastW = window.innerWidth;
+window.addEventListener("resize", function () { if (window.innerWidth === lastW) return; lastW = window.innerWidth; clearTimeout(rz); rz = setTimeout(route, 150); });
+
+/* ---------- Samouczek: przewodnik krok po kroku ---------- */
+var TOUR = [
+  { v: "strategia", s: "#presets", t: "Zacznij od gotowego zestawu", x: "Wybierz jeden z trzech zestawów reguł. Każdy możesz potem dowolnie zmienić suwakami poniżej." },
+  { v: "strategia", s: '[data-rule="useTrend"]', t: "Warunki kupna", x: "Przełącznik włącza regułę, a suwak ustawia jej próg. Spółka jest kupowana dopiero wtedy, gdy spełnia wszystkie włączone warunki." },
+  { v: "strategia", s: '[data-rule="useTrail"]', t: "Warunki sprzedaży", x: "Pozycja jest zamykana, gdy zadziała którykolwiek włączony warunek. Reguła spadku od szczytu ogranicza stratę na pojedynczej pozycji." },
+  { v: "strategia", s: "#derived", t: "Wielkość pozycji i ryzyko", x: "Tu widzisz, jaką część kapitału zajmuje jedna pozycja i ile możesz na niej stracić. Zmieniasz to liczbą pozycji, dopuszczalnym spadkiem i ryzykiem na pozycję." },
+  { v: "strategia", s: "#verdict", t: "Werdykt", x: "Każda zmiana parametru od razu przelicza test. Werdykt porównuje strategię z samym trzymaniem tych samych spółek pod względem zysku i obsunięcia." },
+  { v: "strategia", s: "#tiles", t: "Najważniejsze liczby", x: "Sześć miar jakości strategii, każda z porównaniem albo objaśnieniem. Najedź na kafelek, żeby przeczytać, co dokładnie mierzy." },
+  { v: "strategia", s: "#eq-chart", t: "Wykres kapitału", x: "Niebieska linia to strategia, a pomarańczowa przerywana to kup i trzymaj. Najedź na wykres, żeby odczytać wartości z wybranego dnia." },
+  { v: "strategia", s: "#periods", t: "Dopasowanie a sprawdzian", x: "Parametry dobieraj na okresie dopasowania, a oceniaj na sprawdzianie. Jeśli wynik w sprawdzianie wyraźnie się pogarsza, reguły są przeuczone." },
+  { v: "skaner", s: "#scan-counts", t: "Skaner: stan na dziś", x: "Skaner stosuje Twoje reguły do aktualnych notowań. Liczniki pokazują, ile spółek ma sygnał kupna, sprzedaży, jest trzymanych albo czeka poza rynkiem." },
+  { v: "skaner", s: "#scanlist .srow:not(.head)", t: "Wiersz spółki", x: "Każdy wiersz pokazuje stan, kurs, próg sprzedaży i spełnione warunki kupna. Kliknij wiersz, żeby rozwinąć wykres z zaznaczonymi sygnałami." },
+  { v: "portfel", s: "#pf-form", t: "Portfel: Twoje pozycje", x: "Tu wpisujesz to, co naprawdę kupiłeś: spółkę, datę, cenę i liczbę akcji. Pod formularzem podajesz wolną gotówkę." },
+  { v: "portfel", s: "#todo", t: "Portfel: Do zrobienia", x: "Na podstawie Twoich pozycji i reguł aplikacja wypisuje konkretne polecenia: co sprzedać, co kupić i za ile, co trzymać." },
+  { v: "metoda", s: "#metoda .card", t: "Metoda", x: "Twoje reguły zapisane zwykłymi zdaniami, a niżej założenia i ograniczenia testu. Przeczytaj je, zanim użyjesz sygnałów na prawdziwych pieniądzach." },
+  { v: "instrukcja", s: "#tour-start", t: "To wszystko", x: "Opis każdej funkcji znajdziesz w zakładce Instrukcja. Samouczek uruchomisz ponownie tym przyciskiem." }
+];
+var tourI = -1, tEl = $("tour"), tHole = $("tour-hole"), tCard = $("tour-card");
+function tourPlace() {
+  if (tourI < 0) return;
+  var el = document.querySelector(TOUR[tourI].s); if (!el) return;
+  if (!el.offsetParent) el = $("people");   // karta ukryta, bo nie wybrano osoby
+  var r = el.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight, pad = 6;
+  var top = Math.max(4, r.top - pad), left = Math.max(4, r.left - pad), right = Math.min(vw - 4, r.right + pad), bottom = Math.min(vh - 4, r.bottom + pad);
+  tHole.style.left = left + "px"; tHole.style.top = top + "px"; tHole.style.width = Math.max(0, right - left) + "px"; tHole.style.height = Math.max(0, bottom - top) + "px";
+  var cw = tCard.offsetWidth, ch = tCard.offsetHeight, x = Math.min(Math.max(12, left), vw - cw - 12), y;
+  if (bottom + 12 + ch <= vh - 8) y = bottom + 12;
+  else if (top - 12 - ch >= 8) y = top - 12 - ch;
+  else y = vh - ch - 12;
+  tCard.style.left = x + "px"; tCard.style.top = y + "px";
+}
+function tourShow(i) {
+  tourI = i; var st = TOUR[i];
+  if ((location.hash || "#strategia") !== "#" + st.v) { location.hash = st.v; route(); }
+  tEl.hidden = false; hideHint(); $("welcome").hidden = true;
+  $("tour-step").textContent = "Krok " + (i + 1) + " z " + TOUR.length;
+  $("tour-title").textContent = st.t; $("tour-text").textContent = st.x;
+  $("tour-prev").disabled = i === 0; $("tour-next").textContent = i === TOUR.length - 1 ? "Zakończ" : "Dalej";
+  $("tour-skip").style.visibility = i === TOUR.length - 1 ? "hidden" : "visible";
+  var el = document.querySelector(st.s);
+  if (el && !el.offsetParent && st.v === "portfel") el = $("people");
+  if (el) { el.scrollIntoView({ block: "center", inline: "nearest" }); if (el.getBoundingClientRect().height > window.innerHeight * 0.3) { el.scrollIntoView({ block: "start", inline: "nearest" }); window.scrollBy(0, -64); } }
+  tourPlace(); setTimeout(tourPlace, 60); setTimeout(tourPlace, 350);
+  $("tour-next").focus({ preventScroll: true });
+}
+function tourEnd() { tourI = -1; tEl.hidden = true; $("welcome").hidden = true; try { localStorage.setItem("pulpit-samouczek", "1"); } catch (e) {} }
+document.addEventListener("click", function (e) {
+  var t = e.target.closest ? e.target.closest("#tour-start, [data-tour-start], #tour-next, #tour-prev, #tour-skip, #welcome-no") : null; if (!t) return;
+  if (t.id === "tour-next") { if (tourI === TOUR.length - 1) tourEnd(); else tourShow(tourI + 1); }
+  else if (t.id === "tour-prev") { if (tourI > 0) tourShow(tourI - 1); }
+  else if (t.id === "tour-skip" || t.id === "welcome-no") tourEnd();
+  else tourShow(0);
+});
+document.addEventListener("keydown", function (e) { if (tourI >= 0 && e.key === "Escape") tourEnd(); });
+var tourRaf = 0;
+function tourReplace() { if (tourI < 0) return; cancelAnimationFrame(tourRaf); tourRaf = requestAnimationFrame(tourPlace); }
+window.addEventListener("scroll", tourReplace, true); window.addEventListener("resize", tourReplace);
+try { if (!localStorage.getItem("pulpit-samouczek")) $("welcome").hidden = false; } catch (e) { $("welcome").hidden = false; }
+
+})();
+</script>
+<script>if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(function () {});</script>
+</body>
+</html>
