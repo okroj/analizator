@@ -8,7 +8,8 @@ var fs = require("fs"), path = require("path");
 var arg = {}; process.argv.slice(2).forEach(function (a, i, all) { if (a.slice(0, 2) === "--") arg[a.slice(2)] = all[i + 1]; });
 var NAMES = { AAPL: "Apple", ACN: "Accenture", ADBE: "Adobe", CRM: "Salesforce", DELL: "Dell Technologies", GOOG: "Alphabet", INTU: "Intuit", LRCX: "Lam Research", META: "Meta Platforms", MSFT: "Microsoft", NFLX: "Netflix", NVDA: "Nvidia", RMD: "ResMed", SAP: "SAP (ADR)", TSLA: "Tesla", TSM: "TSMC (ADR)" };
 var EXTRA = { AMZN: "Amazon", PLTR: "Palantir", MU: "Micron", AVGO: "Broadcom", SPCX: "SpaceX" };
-/* --extra PLIK.json ({"SYMBOL": "Nazwa", ...}) zastępuje domyślną listę spółek z samymi kursami */
+/* --extra PLIK.json zastępuje domyślną listę spółek z samymi kursami: {"SYMBOL": "Nazwa"} albo {"SYMBOL": {n: "Nazwa", cur: "PLN", m: "GPW"}}
+   --fx 3.9100 --fxdate RRRR-MM-DD: kurs dolara w złotych, zapisywany w danych jako fx */
 if (arg.extra && fs.existsSync(arg.extra)) { try { EXTRA = JSON.parse(fs.readFileSync(arg.extra, "utf8")); } catch (err) { fail("zły plik --extra"); } }
 var START = "2005-01-03", HEADER = "date,open,high,low,close,volume,ttm_net_eps,pe_ratio", HEADER2 = "date,open,high,low,close,volume,div,split";
 function fail(msg) { console.log(JSON.stringify({ ok: false, error: msg })); process.exit(1); }
@@ -79,9 +80,13 @@ if (arg.csv2) Object.keys(EXTRA).forEach(function (s) {
   if (bad || first < 0) { extraNote.push(s + ": brak poprawnych kursów"); return; }
   for (i = first + 1; i < N; i++) if (c[i] === null) { c[i] = c[i - 1]; o[i] = c[i - 1]; filled++; }
   if (last < N - 1) extraNote.push(s + ": ostatni kurs z " + cal[last]);
-  tickers.push({ s: s, n: EXTRA[s], start: first, x: 1, o: o, c: c, q: [] });
+  var meta = typeof EXTRA[s] === "string" ? { n: EXTRA[s] } : (EXTRA[s] || {}), tk = { s: s, n: meta.n || s, start: first, x: 1 };
+  if (meta.cur === "PLN") tk.cur = "PLN";        // waluta notowań; brak pola oznacza dolary
+  if (meta.m) tk.m = meta.m;                     // rynek poza USA (GPW, LSE): bez kursów na żywo
+  tk.o = o; tk.c = c; tk.q = []; tickers.push(tk);
 });
 var M = { asOf: asOf, source: arg.source || "Pubmarks/datasets i yennanliu/finance_data (GitHub)", dates: cal.map(function (d) { return +d.replace(/-/g, ""); }), tickers: tickers };
+if (+arg.fx > 2 && +arg.fx < 8) M.fx = { USDPLN: +arg.fx, d: +String(arg.fxdate || "").replace(/-/g, "") || 0 };
 
 /* porównanie z poprzednią wersją danych */
 var prev = null;
@@ -96,7 +101,8 @@ if (prev) {
     for (var i = pt.start; i < prev.dates.length; i++) if (prev.dates[i] === M.dates[i] && pt.c[i] && nt.c[i] && Math.abs(nt.c[i] / pt.c[i] - 1) > 0.02) check.historyChanged++;
   });
 }
-var out = { ok: true, asOf: asOf, newData: !prev || asOf > prev.asOf || tickers.map(function (t) { return t.s + t.n; }).join() !== prev.tickers.map(function (t) { return t.s + t.n; }).join(), check: check };
+function sig(t) { return t.s + t.n + (t.cur || "") + (t.m || ""); }
+var out = { ok: true, asOf: asOf, newData: !prev || asOf > prev.asOf || tickers.map(sig).join() !== prev.tickers.map(sig).join() || !!M.fx !== !!prev.fx, check: check };
 if (out.newData) fs.writeFileSync(arg.out, "window.MARKET=" + JSON.stringify(M) + ";\n");
 
 /* sygnały dla zapisanych parametrów i portfela */

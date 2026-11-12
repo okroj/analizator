@@ -1,10 +1,26 @@
 {
   "extra": [
-    { "s": "AMZN", "n": "Amazon" },
-    { "s": "V", "n": "Visa" },
-    { "s": "PLTR", "n": "Palantir" },
-    { "s": "MU", "n": "Micron" },
-    { "s": "AVGO", "n": "Broadcom" },
-    { "s": "SPCX", "n": "SpaceX" }
+    {"s": "AMZN", "n": "Amazon"},
+    {"s": "V", "n": "Visa"},
+    {"s": "PLTR", "n": "Palantir"},
+    {"s": "MU", "n": "Micron"},
+    {"s": "AVGO", "n": "Broadcom"},
+    {"s": "SPCX", "n": "SpaceX"},
+    {"s": "KGH", "n": "KGHM Polska Miedź", "cur": "PLN", "m": "GPW", "yahoo": "KGH.WA", "stooq": "kgh"},
+    {"s": "PKN", "n": "Orlen", "cur": "PLN", "m": "GPW", "yahoo": "PKN.WA", "stooq": "pkn"},
+    {"s": "PKO", "n": "PKO Bank Polski", "cur": "PLN", "m": "GPW", "yahoo": "PKO.WA", "stooq": "pko"},
+    {"s": "PZU", "n": "PZU", "cur": "PLN", "m": "GPW", "yahoo": "PZU.WA", "stooq": "pzu"},
+    {"s": "PEO", "n": "Bank Pekao", "cur": "PLN", "m": "GPW", "yahoo": "PEO.WA", "stooq": "peo"},
+    {"s": "CDR", "n": "CD Projekt", "cur": "PLN", "m": "GPW", "yahoo": "CDR.WA", "stooq": "cdr"},
+    {"s": "ALE", "n": "Allegro", "cur": "PLN", "m": "GPW", "yahoo": "ALE.WA", "stooq": "ale"},
+    {"s": "LPP", "n": "LPP", "cur": "PLN", "m": "GPW", "yahoo": "LPP.WA", "stooq": "lpp"},
+    {"s": "DNP", "n": "Dino Polska", "cur": "PLN", "m": "GPW", "yahoo": "DNP.WA", "stooq": "dnp"},
+    {"s": "XTB", "n": "XTB", "cur": "PLN", "m": "GPW", "yahoo": "XTB.WA", "stooq": "xtb"},
+    {"s": "PGE", "n": "PGE", "cur": "PLN", "m": "GPW", "yahoo": "PGE.WA", "stooq": "pge"},
+    {"s": "MBK", "n": "mBank", "cur": "PLN", "m": "GPW", "yahoo": "MBK.WA", "stooq": "mbk"},
+    {"s": "CCC", "n": "CCC", "cur": "PLN", "m": "GPW", "yahoo": "CCC.WA", "stooq": "ccc"},
+    {"s": "JSW", "n": "JSW", "cur": "PLN", "m": "GPW", "yahoo": "JSW.WA", "stooq": "jsw"},
+    {"s": "ETFBW20TR", "n": "Beta ETF WIG20TR", "cur": "PLN", "m": "GPW", "yahoo": "ETFBW20TR.WA", "stooq": "etfbw20tr.pl"},
+    {"s": "IGLN", "n": "iShares Physical Gold", "cur": "USD", "m": "LSE", "yahoo": "IGLN.L", "stooq": "igln.uk"}
   ]
 }
