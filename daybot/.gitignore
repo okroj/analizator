@@ -1,0 +1,6 @@
+.env
+config.json
+state/
+logs/
+STOP
+node_modules/
