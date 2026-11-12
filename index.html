@@ -97,6 +97,7 @@ nav a[aria-current="page"] { background: var(--ink); color: var(--surface); }
 .chart svg { display: block; width: 100%; overflow: visible; }
 .chart text { font-family: var(--font-num); font-size: 10.5px; fill: var(--muted); }
 .chart .end { fill: var(--ink); font-size: 11px; }
+.chart .tag { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
 .chart .grid { stroke: var(--line); stroke-width: 1; }
 .chart .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
 .chart .cross { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -199,6 +200,11 @@ input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(-
 .chip:disabled { opacity: .4; cursor: default; }
 .welcome { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-bottom: 12px; font-size: 14px; }
 .welcome[hidden], .tour[hidden] { display: none; }
+.symlink { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+.symlink:hover, .symlink:focus-visible { color: var(--accent); text-decoration-color: var(--accent); }
+body.solo .top nav, body.solo #who, body.solo #tour-start, body.solo .welcome, body.solo .mini { display: none !important; }
+.wk-title { font-family: var(--font-display); font-stretch: 78%; font-size: 24px; font-weight: 700; line-height: 1.15; }
+.wk-sub { font-size: 14px; margin-top: 4px; color: var(--muted); } .wk-sub b { color: var(--ink); }
 .welcome span { flex: 1 1 240px; }
 .tour-hole { position: fixed; z-index: 30; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(8, 12, 16, .62); outline: 2px solid var(--accent); pointer-events: none; transition: left .18s, top .18s, width .18s, height .18s; }
 .tour-card { position: fixed; z-index: 31; width: min(340px, calc(100vw - 24px)); background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); display: grid; gap: 6px; }
@@ -301,6 +307,20 @@ input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(-
         </div>
         <p class="note" style="margin:0" id="scan-note"></p>
         <div class="scanlist" id="scanlist"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-wykres" hidden>
+      <div class="card">
+        <div class="dhead">
+          <div><div class="wk-title" id="wk-title"></div><div class="wk-sub" id="wk-sub"></div></div>
+          <div class="seg" id="wk-range" role="group" aria-label="Okres na wykresie"></div>
+        </div>
+        <div class="legend" id="wk-legend" style="margin-top:14px"></div>
+        <div class="chart" id="wk-chart"></div>
+        <div class="dfacts" id="wk-facts" style="margin-top:10px"></div>
+        <p class="note" id="wk-note"></p>
+        <p class="note"><a href="./#portfel">Otwórz całą aplikację</a></p>
       </div>
     </section>
 
@@ -500,7 +520,8 @@ function logTicks(lo, hi) {
   }
   return best;
 }
-/* o: {idx, series:[{name,color,get(i),dash}], log, fmt, h, vline, markers:[{i,y,type}], top0} */
+var MON = ["sty", "lut", "mar", "kwi", "maj", "cze", "lip", "sie", "wrz", "paź", "lis", "gru"];
+/* o: {idx, series:[{name,color,get(i),dash}], log, fmt, h, vline, vlabel, xm, markers:[{i,y,type}], top0} */
 function drawChart(el, o) {
   var W = Math.max(280, el.clientWidth), H = o.h, ml = 46, mr = W < 520 ? 70 : 82, mt = 10, mb = 22;
   var idx = o.idx, i0 = idx[0], i1 = idx[idx.length - 1], lo = Infinity, hi = -Infinity;
@@ -516,24 +537,33 @@ function drawChart(el, o) {
   ticks.forEach(function (v) { var y = Y(v); g += '<line class="grid" x1="' + ml + '" x2="' + (W - mr) + '" y1="' + y + '" y2="' + y + '"/><text x="' + (ml - 6) + '" y="' + (y + 3.5) + '" text-anchor="end">' + o.axis(v) + "</text>"; });
   /* lata na osi X */
   var years = [], last = 0;
+  if (o.xm) {   // krótki okres: podpisy miesięcy zamiast lat
+    idx.forEach(function (i) { var mo = Math.floor(M.dates[i] / 100); if (mo !== last) { if (last) years.push([mo, i]); last = mo; } });
+    var evm = Math.max(1, Math.ceil(years.length / Math.max(2, Math.floor((W - ml - mr) / 62))));
+    years.forEach(function (yr, k) { if (k % evm === 0) g += '<text x="' + X(yr[1]) + '" y="' + (H - 6) + '" text-anchor="middle">' + MON[yr[0] % 100 - 1] + (yr[0] % 100 === 1 || k === 0 ? " " + Math.floor(yr[0] / 100) : "") + "</text>"; });
+  } else {
   idx.forEach(function (i) { var y = Math.floor(M.dates[i] / 10000); if (y !== last) { if (last) years.push([y, i]); last = y; } });
   var every = Math.max(1, Math.ceil(years.length / Math.max(2, Math.floor((W - ml - mr) / 52))));
   years.forEach(function (yr) { if (yr[0] % every === 0) g += '<text x="' + X(yr[1]) + '" y="' + (H - 6) + '" text-anchor="middle">' + yr[0] + "</text>"; });
+  }
   if (o.vline != null && o.vline > i0 && o.vline < i1) {
     var vx = X(o.vline);
-    g += '<line class="cross" x1="' + vx + '" x2="' + vx + '" y1="' + mt + '" y2="' + (H - mb) + '"/><text x="' + (vx + 5) + '" y="' + (mt + 10) + '">sprawdzian</text>';
+    g += '<line class="cross" x1="' + vx + '" x2="' + vx + '" y1="' + mt + '" y2="' + (H - mb) + '"/><text x="' + (vx + 5) + '" y="' + (mt + 10) + '">' + esc(o.vlabel || "sprawdzian") + "</text>";
   }
-  var ends = [];
+  var ends = [], tags = [];
   o.series.forEach(function (s) {
     var d = "", pen = false;
     s.v.forEach(function (v, k) { if (!isFinite(v)) { pen = false; return; } d += (pen ? "L" : "M") + X(idx[k]).toFixed(1) + " " + Y(v).toFixed(1); pen = true; });
     g += '<path class="ln" d="' + d + '" stroke="' + s.color + '"' + (s.dash ? ' stroke-dasharray="5 4"' : "") + "/>";
     var lv = s.v[s.v.length - 1];
+    if (s.tag) { if (isFinite(lv)) tags.push({ y: Y(lv), t: s.tag + " " + (o.endFmt || o.fmt)(lv) }); return; }   // linia stałego poziomu: podpis przy linii zamiast na końcu
     if (isFinite(lv)) { g += '<circle cx="' + X(i1) + '" cy="' + Y(lv) + '" r="4" fill="' + s.color + '" stroke="var(--surface)" stroke-width="2"/>'; ends.push({ y: Y(lv), t: (o.endFmt || o.fmt)(lv) }); }
   });
   ends.sort(function (p, q) { return p.y - q.y; });
   for (var k = 1; k < ends.length; k++) if (ends[k].y - ends[k - 1].y < 13) ends[k].y = ends[k - 1].y + 13;
   ends.forEach(function (e2) { g += '<text class="end" x="' + (W - mr + 9) + '" y="' + (e2.y + 3.5) + '">' + esc(e2.t) + "</text>"; });
+  tags.sort(function (p, q) { return p.y - q.y; });
+  tags.forEach(function (tg, k) { var above = k === 0 && tg.y - 8 > mt + 8; g += '<text class="end tag" x="' + (ml + 8) + '" y="' + (tg.y + (above ? -6 : 14)) + '">' + esc(tg.t) + "</text>"; });
   (o.markers || []).forEach(function (m) {
     if (m.i < i0 || m.i > i1) return;
     var x = X(m.i), y = Y(m.y), up = m.type === "buy";
@@ -669,7 +699,7 @@ function renderDetail() {
   if (isFinite(r.vsSma)) f.push("Względem średniej z " + P.smaLong + " sesji: " + pc(r.vsSma, 1, true) + ".");
   if (isFinite(r.eps)) f.push("Zysk na akcję z 12 mies.: " + nf(r.eps, 2) + " $" + (isFinite(r.growth) && Math.abs(r.growth) < 900 ? " (" + pc(r.growth, 0, true) + " r/r)" : "") + ".");
   if (isFinite(r.pe)) f.push("P/E: " + nf(r.pe, 1) + ".");
-  el.innerHTML = '<div class="dhead"><div class="legend" style="margin:0" id="d-legend"></div><div class="seg" role="group" aria-label="Zakres wykresu"><button type="button" data-range="5" data-tip="range-5" aria-pressed="' + (ui.range === "5") + '">5 lat</button><button type="button" data-range="all" data-tip="range-all" aria-pressed="' + (ui.range === "all") + '">Cały test</button></div></div><div class="chart" id="d-chart"></div><div class="dfacts">' + f.join(" ") + "</div>";
+  el.innerHTML = '<div class="dhead"><div class="legend" style="margin:0" id="d-legend"></div><div class="seg" role="group" aria-label="Zakres wykresu"><button type="button" data-range="5" data-tip="range-5" aria-pressed="' + (ui.range === "5") + '">5 lat</button><button type="button" data-range="all" data-tip="range-all" aria-pressed="' + (ui.range === "all") + '">Cały test</button></div><button class="chip" type="button" data-chart="' + esc(r.s) + '" data-tip="wk-open">Wykres w nowym oknie</button></div><div class="chart" id="d-chart"></div><div class="dfacts">' + f.join(" ") + "</div>";
   legend($("d-legend"), ser.concat([{ name: "sygnał kupna", glyph: "▲", color: "var(--good)" }, { name: "sygnał sprzedaży", glyph: "▼", color: "var(--crit)" }]));
   drawChart($("d-chart"), { idx: sample(a, N - 1), h: 290, log: true, series: ser, label: "Kurs " + r.s + " ze średnimi i sygnałami",
     markers: S.events.map(function (e) { return { i: e.i, y: T.c[e.i], type: e.type }; }), fmt: function (v) { return price(v) + " $"; }, axis: function (v) { return nf(v, v < 10 ? 1 : 0); } });
@@ -923,7 +953,8 @@ function renderPortfolio() {
     (known.length ? '<span>Wynik otwartych pozycji <b class="' + cls(pnl) + '">' + (pnl > 0 ? "+" : "") + money(pnl).replace("-", "−") + " (" + pct(A.cost > 0 ? pnl / A.cost : 0, 1, true) + ")</b></span>" : "");
   var rows = A.items.filter(function (x) { return x.p; }).map(function (x) {
     var nd = x.type === "nodata";
-    return "<tr><td><b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b></td><td class='num'>" + dstr(x.p.date.replace(/-/g, "")) + "</td><td class='num'>" + price(x.p.px) + "</td><td class='num'>" + shares(x.p.qty) + "</td><td class='num'>" + (nd && !x.hasPx ? "–" : price(x.close)) + "</td><td class='num'>" + money(x.value) +
+    var hist = M.tickers.some(function (t) { return t.s === x.s; });
+    return "<tr><td>" + (hist ? "<button class='symlink' type='button' data-chart='" + esc(x.s) + "' data-pos='" + esc(x.p.id) + "' data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</button>" : "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b>") + "</td><td class='num'>" + dstr(x.p.date.replace(/-/g, "")) + "</td><td class='num'>" + price(x.p.px) + "</td><td class='num'>" + shares(x.p.qty) + "</td><td class='num'>" + (nd && !x.hasPx ? "–" : price(x.close)) + "</td><td class='num'>" + money(x.value) +
       "</td><td class='num " + (nd && !x.hasPx ? "" : cls(x.ret)) + "'>" + (nd && !x.hasPx ? "–" : pct(x.ret, 1, true)) + "</td><td class='num'>" + (nd || isNaN(x.stop) ? "–" : price(x.stop)) + "</td><td class='num'>" + (nd || isNaN(x.toStop) ? "–" : x.toStop >= 0 ? "przekroczony" : pct(-x.toStop, 1)) +
       "</td><td><span class='pill " + ACT[x.type][0] + "' data-tip='a-" + (x.hasPx ? "liveonly" : x.type) + "'>" + (x.hasPx ? "○ Tylko kurs" : ACT[x.type][1]) + "</span></td><td><button class='icon-btn edit' type='button' data-edit='" + esc(x.p.id) + "' data-tip='pf-edit' aria-label='Edytuj pozycję " + esc(x.s) + "'>Edytuj</button> <button class='icon-btn' type='button' data-del='" + esc(x.p.id) + "' data-tip='pf-del' aria-label='Usuń pozycję " + esc(x.s) + "'>Usuń</button></td></tr>";
   });
@@ -979,7 +1010,7 @@ function liveSocket() {
   ws.onclose = ws.onerror = function () { if (LIVE.ws === ws) { LIVE.ws = null; clearTimeout(LIVE.retry); if (LIVE.key) LIVE.retry = setTimeout(liveSocket, 20000); } };
 }
 function liveSync() {   // dopasuj subskrypcje do spółek z otwartego portfela
-  if (!CAN_LIVE || !LIVE.key) return;
+  if (!CAN_LIVE || !LIVE.key || SOLO) return;
   var want = liveWanted(), s, fresh = [];
   for (s in LIVE.subs) if (!want[s]) { delete LIVE.subs[s]; delete LIVE.px[s]; if (LIVE.ws && LIVE.ws.readyState === 1) LIVE.ws.send(JSON.stringify({ type: "unsubscribe", symbol: s })); }
   for (s in want) if (!LIVE.subs[s]) { LIVE.subs[s] = true; fresh.push(s); if (LIVE.ws && LIVE.ws.readyState === 1) LIVE.ws.send(JSON.stringify({ type: "subscribe", symbol: s })); }
@@ -1216,6 +1247,8 @@ var TIPS = {
   row: "Kliknij spółkę, żeby rozwinąć wykres kursu ze średnimi i zaznaczonymi sygnałami.",
   "range-5": "Pokazuje na wykresie ostatnie 5 lat.",
   "range-all": "Pokazuje na wykresie cały zakres testu.",
+  "wk-open": "Otwiera wykres tej spółki w osobnym oknie, z wyborem okresu od 3 miesięcy do całej historii. To samo robi kliknięcie symbolu spółki w tabeli Portfela.",
+  "wk-range": "Zmienia okres pokazany na wykresie.",
   tour: "Uruchamia samouczek, który krok po kroku pokazuje najważniejsze miejsca aplikacji."
 };
 var NAMES2 = { V: "Visa", MA: "Mastercard", GOOGL: "Alphabet", AMD: "AMD", INTC: "Intel", ORCL: "Oracle", UBER: "Uber", JPM: "JPMorgan Chase", BAC: "Bank of America", KO: "Coca-Cola", PEP: "PepsiCo", DIS: "Disney", NKE: "Nike", PYPL: "PayPal", COIN: "Coinbase", BABA: "Alibaba", "BRK.B": "Berkshire Hathaway", JNJ: "Johnson & Johnson", PFE: "Pfizer", XOM: "ExxonMobil", WMT: "Walmart", COST: "Costco", MCD: "McDonald's", BA: "Boeing", IBM: "IBM", CSCO: "Cisco", QCOM: "Qualcomm", ASML: "ASML", SHOP: "Shopify", SPOT: "Spotify", ABNB: "Airbnb", SNOW: "Snowflake", CRWD: "CrowdStrike", RKLB: "Rocket Lab", SOFI: "SoFi", HOOD: "Robinhood", PKN: "Orlen", PKO: "PKO Bank Polski", PZU: "PZU", CDR: "CD Projekt", KGH: "KGHM", ALE: "Allegro", LPP: "LPP", DNP: "Dino Polska", PEO: "Bank Pekao", XTB: "XTB" };
@@ -1226,7 +1259,7 @@ function symName(s) {
 var hint = $("hint"), hintFor = null;
 function hideHint() { hint.hidden = true; hintFor = null; }
 function showHint(el) {
-  var key = el.getAttribute("data-tip"), t = key.indexOf("sym:") === 0 ? symName(key.slice(4)) : TIPS[key]; if (!t) { hideHint(); return; }
+  var key = el.getAttribute("data-tip"), t = key.indexOf("sym:") === 0 ? symName(key.slice(4)) + (el.hasAttribute("data-chart") ? ". Kliknij, żeby otworzyć wykres w nowym oknie." : "") : TIPS[key]; if (!t) { hideHint(); return; }
   hint.textContent = t; hint.hidden = false; hintFor = el;
   var r = el.getBoundingClientRect(), w = hint.offsetWidth, h = hint.offsetHeight;
   var x = Math.min(Math.max(8, r.left), window.innerWidth - w - 8), y = r.bottom + 8;
@@ -1271,7 +1304,7 @@ function renderInstruction() {
     '<div class="card"><h2>Skaner</h2><div class="scroll"><table class="ptab">' +
     '<tr><th colspan="2">Stany spółki</th></tr>' + rows([["▲ Kup", "st-buy"], ["● Trzymaj", "st-hold"], ["▼ Sprzedaj", "st-sell"], ["○ Poza", "st-out"]]) +
     '<tr><th colspan="2">Kolumny</th></tr>' + rows([["Kurs ($)", "c-close"], ["Od zakupu", "c-since"], ["Próg sprzedaży", "c-stop"], ["Zapas do progu", "c-tostop"], ["Warunki kupna", "c-checks"]]) +
-    '<tr><th colspan="2">Wykres spółki</th></tr>' + rows([["Rozwinięcie wiersza", "row"], ["5 lat", "range-5"], ["Cały test", "range-all"]]) + "</table></div></div>" +
+    '<tr><th colspan="2">Wykres spółki</th></tr>' + rows([["Rozwinięcie wiersza", "row"], ["5 lat", "range-5"], ["Cały test", "range-all"], ["Wykres w nowym oknie", "wk-open"]]) + "</table></div></div>" +
     '<div class="card"><h2>Portfel</h2><p style="margin-bottom:10px">Kapitał początkowy w Strategii służy tylko do testu na danych historycznych. Prawdziwe pozycje i gotówkę wpisujesz w Portfelu, a notowania odświeżają się automatycznie po każdej sesji w USA.</p><div class="scroll"><table class="ptab">' +
     '<tr><th colspan="2">Do zrobienia</th></tr>' + rows([["Lista poleceń", "h-todo"], ["▼ Sprzedaj", "a-sell"], ["▲ Kup", "a-buy"], ["◆ Obserwuj", "a-watch"], ["● Trzymaj", "a-hold"], ["○ Bez danych", "a-nodata"]]) +
     '<tr><th colspan="2">Pozycje</th></tr>' + rows([["Tabela pozycji", "h-pos"], ["Spółka", "pt-sym"], ["Kupno", "pt-date"], ["Cena ($)", "pt-px"], ["Liczba", "pt-qty"], ["Kurs ($)", "c-close"], ["Wartość", "pt-val"], ["Wynik", "pt-ret"], ["Próg sprzedaży", "c-stop"], ["Zapas do progu", "c-tostop"], ["Stan", "pc-state"], ["Edytuj", "pf-edit"], ["Usuń", "pf-del"]]) +
@@ -1293,17 +1326,92 @@ function renderInstruction() {
     "</table></div></div>";
 }
 
+/* ---------- Wykres spółki w osobnym oknie: adres#wykres=SYMBOL ---------- */
+var SOLO = /^#wykres=/.test(location.hash);
+var WK = { s: "", t: -1, pos: null, range: "1" }, WKR = [["3m", "3 mies.", 63], ["6m", "6 mies.", 126], ["1", "1 rok", 252], ["3", "3 lata", 756], ["5", "5 lat", 1260], ["all", "Wszystko", 0]];
+function openChart(sym, posId) {
+  var pos = ST.positions.filter(function (p) { return posId ? p.id === posId : p.s === sym; })[0];
+  /* ustawienia strategii i pozycja jadą do nowego okna przez pamięć sesji, a nie w adresie */
+  try { sessionStorage.setItem("ag-wykres-" + sym, JSON.stringify({ params: P, pos: pos ? { s: pos.s, date: pos.date, px: pos.px, qty: pos.qty } : null })); } catch (e) {}
+  var url = location.pathname + location.search + "#wykres=" + encodeURIComponent(sym), w = null;
+  try { w = window.open(url, "wykres_" + sym.replace(/[^A-Za-z0-9]/g, "_"), "popup=yes,width=1120,height=800"); } catch (e) {}
+  if (w) { try { w.focus(); } catch (e) {} } else location.href = url;   // zablokowane okna: wykres otwiera się w tej samej karcie
+}
+function initWykres() {
+  var m = /^#wykres=([A-Za-z0-9.\-]{1,12})$/.exec(location.hash), sym = m ? m[1].toUpperCase() : "", d = null;
+  document.body.classList.add("solo");
+  VIEWS.forEach(function (n) { $("view-" + n).hidden = true; }); $("view-wykres").hidden = false;
+  WK.s = sym; M.tickers.forEach(function (T, t) { if (T.s === sym) WK.t = t; });
+  try { d = JSON.parse(sessionStorage.getItem("ag-wykres-" + sym) || "null"); } catch (e) {}
+  if (!d) try {   // okno otwarte prosto z adresu: ustawienia i pozycja z ostatnio otwartego portfela bez hasła
+    var rec = JSON.parse(lsGet("ag-osoba-" + lsGet("ag-ostatnia")) || "null");
+    if (rec && !rec.enc && rec.data) { var c0 = cleanState(rec.data); d = { params: c0.params, pos: c0.positions.filter(function (p) { return p.s === sym; })[0] || null }; }
+  } catch (e) {}
+  var c = cleanState({ params: d && d.params, positions: d && d.pos ? [d.pos] : [] });
+  P = c.params || Object.assign({}, E.DEFAULTS); WK.pos = c.positions[0] || null; R = E.run(M, P);
+  $("wk-range").addEventListener("click", function (e) { var b = e.target.closest("[data-wk]"); if (!b) return; WK.range = b.dataset.wk; renderWykres(); });
+  renderWykres();
+  if (CAN_LIVE && WK.t >= 0) {   // jedno zapytanie na minutę; strumień na żywo zostaje w głównym oknie
+    LIVE.key = lsGet("ag-finnhub") || "";
+    if (LIVE.key) { var ask = function () { liveQuote(sym).then(renderWykres, function () {}); }; ask(); setInterval(ask, 60000); }
+  }
+  var rzw = 0; window.addEventListener("resize", function () { clearTimeout(rzw); rzw = setTimeout(renderWykres, 150); });
+}
+function renderWykres() {
+  var sym = WK.s, T = WK.t >= 0 ? M.tickers[WK.t] : null;
+  document.title = (sym ? sym + " · wykres" : "Wykres") + " · Analizator giełdy";
+  $("wk-range").innerHTML = WKR.map(function (r) { return '<button type="button" data-wk="' + r[0] + '" data-tip="wk-range" aria-pressed="' + (WK.range === r[0]) + '">' + r[1] + "</button>"; }).join("");
+  if (!T) {
+    $("wk-title").textContent = sym ? "Brak notowań spółki " + sym : "Nie podano spółki";
+    $("wk-sub").textContent = sym ? "Aplikacja nie ma historii notowań tej spółki, więc nie narysuje wykresu." : "Otwórz wykres, klikając symbol spółki w tabeli Portfela.";
+    $("wk-range").hidden = true; ["wk-legend", "wk-chart", "wk-facts", "wk-note"].forEach(function (id) { $(id).innerHTML = ""; }); return;
+  }
+  var I = R.ind[WK.t], S = R.signals[WK.t], live = LIVE.px[sym] > 0 ? LIVE.px[sym] : NaN, lastC = T.c[N - 1], now = isFinite(live) ? live : lastC;
+  var len = WKR.filter(function (r) { return r[0] === WK.range; })[0][2], a = len ? Math.max(T.start, N - 1 - len) : T.start, idx = [], i;
+  var step = Math.max(1, Math.ceil((N - a) / 1600)); for (i = N - 1; i >= a; i -= step) idx.unshift(i);
+  var lo = Infinity, hi = -Infinity, first = NaN; for (i = a; i < N; i++) { var v = T.c[i]; if (isFinite(v)) { if (isNaN(first)) first = v; if (v < lo) lo = v; if (v > hi) hi = v; } }   // liczby z każdej sesji, także gdy wykres jest rysowany co kilka sesji
+  var chg = now / first - 1;
+  $("wk-title").textContent = T.n + " (" + sym + ")";
+  $("wk-sub").innerHTML = (isFinite(live) ? "Kurs teraz <b>" + price(live) + " $</b> · na żywo z " + new Date(LIVE.last).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }) + " · zamknięcie " + dstr(M.dates[N - 1]) + ": " + price(lastC) + " $" : "Kurs zamknięcia z " + dstr(M.dates[N - 1]) + ": <b>" + price(lastC) + " $</b>") +
+    (isFinite(chg) ? ' · <b class="' + cls(chg) + '">' + pct(chg, 1, true) + "</b> w wybranym okresie" : "");
+  var ser = [{ name: "Kurs " + sym, color: "var(--accent)", get: function (k) { return T.c[k]; } }, { name: "Średnia z " + P.smaLong + " sesji", color: "var(--series-2)", get: function (k) { return I.smaL[k]; } }];
+  if (P.useCross) ser.push({ name: "Średnia z " + P.smaFast + " sesji", color: "var(--series-3)", get: function (k) { return I.smaF[k]; } });
+  var it = null, pos = WK.pos, vline = null, facts = [];
+  if (pos) {
+    var lm = null; if (isFinite(live)) { lm = {}; lm[sym] = live; }
+    it = E.actions(M, R, { positions: [pos], cash: 0, fx: 3.91 }, lm).items.filter(function (x) { return x.p; })[0] || null;
+    ser.push({ name: "Twoja cena zakupu", tag: "cena zakupu", color: "var(--muted)", dash: true, get: function () { return pos.px; } });
+    if (it && isFinite(it.stop)) ser.push({ name: "Próg sprzedaży dziś", tag: "próg sprzedaży", color: "var(--crit)", dash: true, get: function () { return it.stop; } });
+    var di = +pos.date.replace(/-/g, ""); for (i = 0; i < N; i++) if (M.dates[i] >= di) { vline = i; break; }
+  }
+  var marks = S ? S.events.filter(function (e) { return e.i >= a; }).map(function (e) { return { i: e.i, y: T.c[e.i], type: e.type }; }) : [];
+  legend($("wk-legend"), ser.concat(marks.length ? [{ name: "sygnał kupna", glyph: "▲", color: "var(--good)" }, { name: "sygnał sprzedaży", glyph: "▼", color: "var(--crit)" }] : []));
+  var span = hi - lo, dec = span < 0.4 ? 2 : span < 4 ? 1 : 0;
+  if (idx.length < 2) $("wk-chart").innerHTML = '<p class="note">Za mało notowań, żeby narysować wykres.</p>';
+  else drawChart($("wk-chart"), { idx: idx, h: Math.max(280, Math.min(window.innerHeight - 330, 620)), log: !len || len > 252, xm: !!len && len <= 252, series: ser, label: "Kurs " + sym + " ze średnią" + (pos ? ", ceną zakupu i progiem sprzedaży" : ""),
+    markers: marks, vline: vline, vlabel: "zakup", fmt: function (v) { return price(v) + " $"; }, axis: function (v) { return nf(v, v < 10 ? Math.max(1, dec) : dec); } });
+  facts.push("Okres: " + dstr(M.dates[a]) + " – " + dstr(M.dates[N - 1]) + ". Najwyższe zamknięcie " + price(hi) + " $, najniższe " + price(lo) + " $.");
+  if (isFinite(I.smaL[N - 1])) facts.push("Kurs względem średniej z " + P.smaLong + " sesji: " + pct(now / I.smaL[N - 1] - 1, 1, true) + ".");
+  if (it) facts.push("Twoja pozycja: " + shares(pos.qty) + " akcji z " + dstr(pos.date.replace(/-/g, "")) + " po " + price(pos.px) + " $, wynik " + pct(it.ret, 1, true) + "." +
+    (it.type !== "nodata" && isFinite(it.stop) ? " Próg sprzedaży " + price(it.stop) + " $, " + (it.toStop >= 0 ? "kurs jest poniżej progu" : "zapas " + pct(-it.toStop, 1)) + "." : "") + (it.type !== "nodata" ? " Stan według reguł: " + ACT[it.type][1].replace(/^\S+\s/, "") + "." : ""));
+  $("wk-facts").textContent = facts.join(" ");
+  $("wk-note").textContent = (marks.length ? "Trójkąty to sygnały Twojej strategii, a nie Twoje transakcje. " : T.x ? "Dla tej spółki aplikacja ma same kursy, bez danych o zyskach, więc nie pokazuje sygnałów kupna. " : "") + "Wykres rysuje kursy zamknięcia. To wynik reguł, a nie rekomendacja inwestycyjna.";
+}
+document.addEventListener("click", function (e) { var c = e.target.closest ? e.target.closest("[data-chart]") : null; if (!c) return; e.preventDefault(); hideHint(); openChart(c.dataset.chart, c.dataset.pos || ""); });
+
 /* ---------- nawigacja i start ---------- */
 var VIEWS = ["strategia", "skaner", "portfel", "metoda", "instrukcja"];
 function route() {
+  if (SOLO) return;
   var v = (location.hash || "#strategia").slice(1); if (VIEWS.indexOf(v) < 0) v = "strategia";
   VIEWS.forEach(function (n) { $("view-" + n).hidden = n !== v; if (n === v) $("nav-" + n).setAttribute("aria-current", "page"); else $("nav-" + n).removeAttribute("aria-current"); });
   $("mini").style.display = v === "strategia" ? "" : "none";
   if (R) { if (v === "strategia") renderStrategy(); if (v === "skaner") renderScanner(); }
 }
 $("asof").textContent = "Notowania do " + dstr(M.dates[N - 1]) + " · " + UNI.length + " popularnych spółek z USA";
-buildParams(); syncParams(); renderInstruction(); initPortfolio(); compute(); checkLink(); route(); initPeople(); initLive();
-window.addEventListener("hashchange", function () { checkLink(); route(); });
+buildParams(); syncParams(); renderInstruction(); initPortfolio();
+if (SOLO) initWykres(); else { compute(); checkLink(); route(); initPeople(); initLive(); }
+window.addEventListener("hashchange", function () { if (SOLO || /^#wykres=/.test(location.hash)) { location.reload(); return; } checkLink(); route(); });
 $("link-card").addEventListener("click", function (e) { var b = e.target.closest("[data-link]"); if (!b) return; if (b.dataset.link === "yes") acceptLink(); else { LINK = null; renderLink(); } });
 $("trades-more").addEventListener("click", function () { ui.allTrades = !ui.allTrades; renderStrategy(); });
 $("scanlist").addEventListener("click", function (e) {
