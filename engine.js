@@ -259,7 +259,8 @@
   function dstr(n) { var s = String(n); return s.slice(6) + "." + s.slice(4, 6) + "." + s.slice(0, 4); }
   var WHY = { stop: "spadek od szczytu", trend: "kurs pod średnią", zysk: "spadek zysku spółki" };
 
-  /* st = { positions: [{s, date: "RRRR-MM-DD", px, qty}], cash }.
+  /* st = { positions: [{s, date: "RRRR-MM-DD", px, qty}], cash, fx }. Ceny pozycji są w walucie notowań spółki (pole cur spółki: brak = USD, "PLN" = złote).
+     Wartości i sumy wychodzą w dolarach: pozycje w złotych dzielone są przez fx (kurs dolara w złotych), cash jest w dolarach.
      Każda pozycja jest prowadzona regułami sprzedaży od dnia zakupu; wolne miejsca dostają kandydatów do kupna. */
   /* live = { SYMBOL: bieżący kurs } (opcjonalnie): zastępuje ostatnie zamknięcie w wycenie i w zapasie do progu */
   function actions(M, R, st, live) {
@@ -267,6 +268,7 @@
     for (i = N - 1; i >= 0; i--) if (ev[i]) { if (lastEval < 0) lastEval = i; else { prevEval = i; break; } }
     var bySym = {}; TT.forEach(function (T, t) { bySym[T.s] = t; });
     var positions = (st && st.positions) || [], cash = st && st.cash > 0 ? +st.cash : 0;
+    var fx = st && st.fx > 0 ? +st.fx : (M.fx && M.fx.USDPLN > 0 ? M.fx.USDPLN : 3.91);
     var items = [], heldSyms = {}, value = 0, cost = 0, sellValue = 0, keep = 0;
     positions.forEach(function (p) {
       heldSyms[p.s] = true;
@@ -285,14 +287,14 @@
         if (T.c[k] > peak) peak = T.c[k];
         if (ev[k] && !sig) { var why = exitReason(T, I, P, k, peak); if (why) sig = { i: k, why: why }; }
       }
-      var c = lp || T.c[N - 1], val = p.qty * c;
+      var toUsd = T.cur === "PLN" ? 1 / fx : 1, c = lp || T.c[N - 1], val = p.qty * c * toUsd, paid = p.qty * p.px * toUsd;
       if (c > peak) peak = c;
       var a = P.useTrail ? peak * (1 - P.trail / 100) : -Infinity;
       var b = P.useTrendExit && isFinite(I.smaL[N - 1]) ? I.smaL[N - 1] * (1 - P.exitBuffer / 100) : -Infinity;
       var stop = Math.max(a, b); if (!isFinite(stop)) stop = NaN;
-      value += val; cost += p.qty * p.px;
+      value += val; cost += paid;
       if (sig) sellValue += val; else keep++;
-      items.push({ type: sig ? "sell" : (c <= stop ? "watch" : "hold"), s: p.s, n: T.n, t: t, p: p, close: c, value: val, ret: c / p.px - 1, pnl: val - p.qty * p.px,
+      items.push({ type: sig ? "sell" : (c <= stop ? "watch" : "hold"), s: p.s, n: T.n, t: t, p: p, cur: T.cur === "PLN" ? "PLN" : "USD", close: c, value: val, ret: c / p.px - 1, pnl: val - paid,
         stop: stop, toStop: isNaN(stop) ? NaN : stop / c - 1, sig: sig, fresh: !!sig && sig.i >= lastEval });
     });
     var total = value + cash, free = Math.max(0, P.maxPos - keep), cand = [];

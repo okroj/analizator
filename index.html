@@ -363,20 +363,21 @@ body.solo .top nav, body.solo #who, body.solo #tour-start, body.solo .welcome, b
             <label for="pf-sym" data-tip="pf-sym">Spółka<select id="pf-sym"></select></label>
             <label for="pf-other" id="pf-other-wrap" data-tip="pf-sym" hidden>Symbol spółki<input type="text" id="pf-other" maxlength="12" autocomplete="off" autocapitalize="characters"></label>
             <label for="pf-date" data-tip="pf-date">Data zakupu<input type="date" id="pf-date"></label>
-            <label for="pf-px" data-tip="pf-px">Cena zakupu ($)<input type="number" id="pf-px" min="0" step="0.01" inputmode="decimal"></label>
+            <label for="pf-px" data-tip="pf-px"><span>Cena zakupu (<span id="pf-px-cur">$</span>)</span><input type="number" id="pf-px" min="0" step="0.01" inputmode="decimal"></label>
             <label for="pf-qty" data-tip="pf-qty">Liczba akcji<input type="number" id="pf-qty" min="0" step="any" inputmode="decimal"></label>
             <button class="chip primary" type="submit" id="pf-add">Dodaj pozycję</button>
             <button class="chip" type="button" id="pf-cancel" hidden>Anuluj</button>
           </form>
           <p class="alert" id="pf-err" role="alert" style="margin:10px 0 0" hidden></p>
           <div class="pf-form" style="margin-top:16px;max-width:520px">
-            <label for="pf-cash" data-tip="cash">Wolna gotówka na rachunku ($)<input type="number" id="pf-cash" min="0" step="100" inputmode="decimal"></label>
+            <label for="pf-base" data-tip="base">Waluta portfela<select id="pf-base"><option value="USD">dolary ($)</option><option value="PLN">złote (zł)</option></select></label>
+            <label for="pf-cash" data-tip="cash"><span>Wolna gotówka na rachunku (<span id="pf-cash-cur">$</span>)</span><input type="number" id="pf-cash" min="0" step="100" inputmode="decimal"></label>
             <label for="pf-fx" data-tip="fx">Kurs dolara w złotych<input type="number" id="pf-fx" min="0" step="0.01" inputmode="decimal"></label>
           </div>
         </div>
         <div class="card">
           <h2 data-tip="h-io">Przenieś portfel jako tekst</h2>
-          <label for="pf-io" class="note" style="display:block;margin:0 0 6px">Jeden wiersz na pozycję: symbol; data zakupu (RRRR-MM-DD); cena zakupu w $; liczba akcji. Wiersz „GOTOWKA; kwota” ustawia wolną gotówkę w dolarach, a „KURS; 3.91” kurs dolara w złotych.</label>
+          <label for="pf-io" class="note" style="display:block;margin:0 0 6px">Jeden wiersz na pozycję: symbol; data zakupu (RRRR-MM-DD); cena zakupu w walucie notowań spółki ($ dla USA, zł dla GPW); liczba akcji. Wiersz „GOTOWKA; kwota” ustawia wolną gotówkę, a „WALUTA; PLN” przełącza portfel na złote.</label>
           <textarea id="pf-io" spellcheck="false" autocomplete="off"></textarea>
           <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
             <button class="chip" type="button" id="pf-export" data-tip="io-export">Pokaż mój portfel jako tekst</button>
@@ -421,7 +422,7 @@ var $ = function (id) { return document.getElementById(id); };
 
 /* ---------- formatowanie ---------- */
 function nf(x, d) { return x.toLocaleString("pl-PL", { minimumFractionDigits: d, maximumFractionDigits: d }); }
-function pct(x, d, sign) { if (!isFinite(x)) return "–"; var s = nf(x * 100, d == null ? 1 : d) + "%"; return (sign && x > 0 ? "+" : "") + s.replace("-", "−"); }
+function pct(x, d, sign) { if (!isFinite(x)) return "–"; var k = Math.pow(10, d == null ? 1 : d), r = Math.round(x * 100 * k) / k || 0, s = nf(r, d == null ? 1 : d) + "%"; return (sign && r > 0 ? "+" : "") + s.replace("-", "−"); }
 function pc(x, d, sign) { return pct(x / 100, d, sign); }
 function money(x) { return nf(Math.round(x), 0) + " $"; }
 function price(x) { return x == null || !isFinite(x) ? "–" : nf(x, x < 10 ? 3 : 2); }
@@ -716,29 +717,31 @@ function renderDetail() {
 }
 
 /* ---------- Portfel: stan, zapis, widok ---------- */
-var ST = { positions: [], cash: 0, fx: 3.91 }, store = { mode: "local", ref: null, busy: false, dirty: false, timer: 0, quiet: false };
+var ST = { positions: [], cash: 0, fx: 0, base: "USD" }, store = { mode: "local", ref: null, busy: false, dirty: false, timer: 0, quiet: false };
 function newId() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
 function cleanState(d) {
-  var out = { positions: [], cash: 0, fx: 0, params: null };
+  var out = { positions: [], cash: 0, fx: 0, base: "USD", params: null };
   if (!d || typeof d !== "object") return out;
   if (Array.isArray(d.positions)) d.positions.slice(0, 200).forEach(function (p) {
     if (p && typeof p.s === "string" && /^[A-Z0-9.\-]{1,12}$/.test(p.s) && /^\d{4}-\d{2}-\d{2}$/.test(p.date) && p.px > 0 && p.qty > 0)
       out.positions.push({ id: typeof p.id === "string" ? p.id.slice(0, 24) : newId(), s: p.s, date: p.date, px: +p.px, qty: +p.qty });
   });
   if (d.cash >= 0) out.cash = +d.cash;
-  if (d.fx > 0 && d.fx < 100) out.fx = +d.fx;
+  if (d.fx > 0 && d.fx < 100 && d.fx !== 3.91) out.fx = +d.fx;   // 0 = kurs z notowań; 3.91 było dawną wartością domyślną, więc też oznacza kurs z notowań
+  if (d.base === "PLN") out.base = "PLN";
   if (d.params && typeof d.params === "object") { out.params = {}; for (var k in E.DEFAULTS) out.params[k] = typeof d.params[k] === typeof E.DEFAULTS[k] ? d.params[k] : E.DEFAULTS[k]; }
   return out;
 }
 /* ---------- portfel jako tekst: wspólny parser dla pola tekstowego i linku ---------- */
 function pnum(t) { return +String(t).replace(/\s/g, "").replace(",", "."); }
 function parsePortfolioText(text) {
-  var lines = String(text).split(/\r?\n/).slice(0, 400), pos = [], cash = null, fx = null, name = "", err = "", today = new Date().toISOString().slice(0, 10);
+  var lines = String(text).split(/\r?\n/).slice(0, 400), pos = [], cash = null, fx = null, base = null, name = "", err = "", today = new Date().toISOString().slice(0, 10);
   lines.forEach(function (ln, k) {
     if (err || !ln.trim()) return;
     var f = ln.split(/[;\t]/).map(function (x) { return x.trim(); }), key = f[0].toUpperCase();
     if (key === "OSOBA") { name = (f[1] || "").slice(0, 30); return; }
-    if (key === "KURS") { var r = pnum(f[1]); if (!(r > 0 && r < 100)) err = "Wiersz " + (k + 1) + ": podaj kurs dolara w złotych."; else fx = r; return; }
+    if (key === "KURS") { var r = pnum(f[1]); if (!(r > 0 && r < 100)) err = "Wiersz " + (k + 1) + ": podaj kurs dolara w złotych."; else fx = r === 3.91 ? 0 : r; return; }
+    if (key === "WALUTA") { var w = (f[1] || "").toUpperCase(); if (w !== "PLN" && w !== "USD") err = "Wiersz " + (k + 1) + ": waluta portfela to PLN albo USD."; else base = w; return; }
     if (key === "GOTOWKA" || key === "GOTÓWKA" || key === "CASH") { var c = pnum(f[1]); if (!(c >= 0)) err = "Wiersz " + (k + 1) + ": podaj kwotę gotówki."; else cash = c; return; }
     var px = pnum(f[2]), qty = pnum(f[3]);
     if (f.length < 4) err = "Wiersz " + (k + 1) + ": potrzebne są cztery pola rozdzielone średnikami.";
@@ -749,9 +752,17 @@ function parsePortfolioText(text) {
     else pos.push({ id: newId(), s: key, date: f[1], px: px, qty: qty });
   });
   if (!err && !pos.length && cash === null) err = "Pole jest puste. Wklej tekst portfela.";
-  return { err: err, pos: pos, cash: cash, fx: fx, name: name };
+  return { err: err, pos: pos, cash: cash, fx: fx, base: base, name: name };
 }
-function portfolioText() { return ST.positions.map(function (p) { return [p.s, p.date, p.px, p.qty].join("; "); }).concat(["GOTOWKA; " + (ST.cash || 0), "KURS; " + ST.fx]).join("\n"); }
+function portfolioText() { return ST.positions.map(function (p) { return [p.s, p.date, p.px, p.qty].join("; "); }).concat(["GOTOWKA; " + (ST.cash || 0)], ST.base === "PLN" ? ["WALUTA; PLN"] : [], ST.fx > 0 ? ["KURS; " + ST.fx] : []).join("\n"); }
+/* waluty: ceny pozycji są w walucie notowań spółki, a sumy w walucie portfela (ST.base) */
+function FX() { return ST.fx > 0 ? ST.fx : (M.fx && M.fx.USDPLN > 0 ? M.fx.USDPLN : 3.91); }
+function tick(s) { return M.tickers.filter(function (t) { return t.s === s; })[0] || null; }
+function unit(cur) { return cur === "PLN" ? " zł" : " $"; }
+function unitOf(s) { var t = tick(s); return unit(t && t.cur); }
+function mon(usd) { return ST.base === "PLN" ? nf(Math.round(usd * FX()), 0) + " zł" : money(usd); }
+function mon2(usd) { return " <i>(" + (ST.base === "PLN" ? money(usd) : nf(Math.round(usd * FX()), 0) + " zł") + ")</i>"; }
+function cashUsd() { return ST.base === "PLN" ? ST.cash / FX() : ST.cash; }
 /* ---------- Osoby: osobne portfele i ustawienia w tej przeglądarce, hasło opcjonalne ---------- */
 var PF = { index: [], active: null, key: null, saving: false, dirty: false, timer: 0, quiet: false, ui: {} };
 var subtle = (window.crypto && window.crypto.subtle) || null;
@@ -777,7 +788,7 @@ function loadIndex() {
   } catch (e) { PF.index = []; }
 }
 function saveIndex() { lsSet("ag-osoby", JSON.stringify(PF.index)); }
-function snapshot() { return { params: JSON.parse(JSON.stringify(P)), positions: ST.positions.map(function (p) { return { id: p.id, s: p.s, date: p.date, px: p.px, qty: p.qty }; }), cash: ST.cash, fx: ST.fx }; }
+function snapshot() { return { params: JSON.parse(JSON.stringify(P)), positions: ST.positions.map(function (p) { return { id: p.id, s: p.s, date: p.date, px: p.px, qty: p.qty }; }), cash: ST.cash, fx: ST.fx, base: ST.base }; }
 function writeProfile(entry, key, data) {
   if (key) return encryptObj(key, data).then(function (rec) { lsSet("ag-osoba-" + entry.id, JSON.stringify(rec)); });
   lsSet("ag-osoba-" + entry.id, JSON.stringify({ enc: 0, data: data })); return Promise.resolve();
@@ -792,7 +803,7 @@ function persist() { clearTimeout(PF.timer); PF.timer = setTimeout(saveProfile, 
 function setMode() { var el = $("store-note"); if (el) el.textContent = PF.active ? "Portfel: " + PF.active.name + (PF.active.salt ? " (zaszyfrowany hasłem)" : "") : ""; }
 function applyData(d) {
   var c = cleanState(d); PF.quiet = true;
-  ST.positions = c.positions; ST.cash = c.cash; ST.fx = c.fx || 3.91; P = c.params || Object.assign({}, E.DEFAULTS);
+  ST.positions = c.positions; ST.cash = c.cash; ST.fx = c.fx; ST.base = c.base; P = c.params || Object.assign({}, E.DEFAULTS);
   ui.editId = null; syncParams(); PF.quiet = false; compute(); renderPeople();
 }
 function openProfile(entry, pass) {
@@ -805,7 +816,7 @@ function openProfile(entry, pass) {
 }
 function lockProfile() {
   clearTimeout(PF.timer); PF.active = null; PF.key = null; lsDel("ag-ostatnia"); PF.quiet = true;
-  ST.positions = []; ST.cash = 0; ST.fx = 3.91; P = Object.assign({}, E.DEFAULTS); ui.editId = null; syncParams(); PF.quiet = false; compute(); renderPeople();
+  ST.positions = []; ST.cash = 0; ST.fx = 0; ST.base = "USD"; P = Object.assign({}, E.DEFAULTS); ui.editId = null; syncParams(); PF.quiet = false; compute(); renderPeople();
 }
 function addProfile(name, pass) {
   name = name.trim().slice(0, 30);
@@ -813,7 +824,7 @@ function addProfile(name, pass) {
   if (PF.index.some(function (p) { return p.name.toLowerCase() === name.toLowerCase(); })) return Promise.resolve("Osoba o takiej nazwie już istnieje.");
   if (pass && !subtle) return Promise.resolve("Ta przeglądarka nie obsługuje szyfrowania. Dodaj osobę bez hasła.");
   var entry = { id: newId(), name: name, salt: pass ? b64(window.crypto.getRandomValues(new Uint8Array(16))) : null };
-  var empty = { params: Object.assign({}, E.DEFAULTS), positions: [], cash: 0, fx: ST.fx };
+  var empty = { params: Object.assign({}, E.DEFAULTS), positions: [], cash: 0, fx: 0, base: "USD" };
   return (pass ? deriveKey(pass, entry.salt) : Promise.resolve(null)).then(function (key) {
     return writeProfile(entry, key, empty).then(function () { PF.index.push(entry); saveIndex(); return true; });
   }).catch(function () { return "Nie udało się dodać osoby."; });
@@ -859,7 +870,7 @@ function renderLink() {
   var el = $("link-card"), r = LINK; el.hidden = !r; if (!r) { el.innerHTML = ""; return; }
   var h = '<h2>Portfel z linku</h2>';
   if (r.err) h += '<p class="alert" style="margin:0 0 10px">Nie udało się wczytać portfela z linku. ' + esc(r.err) + '</p><div class="people"><button class="chip" type="button" data-link="no">Zamknij</button></div>';
-  else h += '<p style="margin:0 0 10px">Link zawiera portfel' + (r.name ? " osoby <b>" + esc(r.name) + "</b>" : "") + ": " + r.pos.length + " " + (r.pos.length === 1 ? "pozycja" : "pozycji") + (r.cash !== null ? ", gotówka " + r.cash + " $" : "") + '. Dodać go w tej przeglądarce jako osobny portfel?</p><div class="people"><button class="chip primary" type="button" data-link="yes">Dodaj portfel</button><button class="chip" type="button" data-link="no">Odrzuć</button></div>';
+  else h += '<p style="margin:0 0 10px">Link zawiera portfel' + (r.name ? " osoby <b>" + esc(r.name) + "</b>" : "") + ": " + r.pos.length + " " + (r.pos.length === 1 ? "pozycja" : "pozycji") + (r.cash !== null ? ", gotówka " + r.cash + (r.base === "PLN" ? " zł" : " $") : "") + '. Dodać go w tej przeglądarce jako osobny portfel?</p><div class="people"><button class="chip primary" type="button" data-link="yes">Dodaj portfel</button><button class="chip" type="button" data-link="no">Odrzuć</button></div>';
   el.innerHTML = h;
 }
 function acceptLink() {
@@ -873,7 +884,7 @@ function acceptLink() {
   }
   clearTimeout(PF.timer); saveProfile();
   if (!entry) { while (PF.index.some(function (p) { return p.name.toLowerCase() === name.toLowerCase(); })) name = base + " " + k++; entry = { id: newId(), name: name, salt: null }; }
-  var isNew = PF.index.indexOf(entry) < 0, data = { params: Object.assign({}, E.DEFAULTS), positions: r.pos, cash: r.cash || 0, fx: r.fx || ST.fx || 3.91 };
+  var isNew = PF.index.indexOf(entry) < 0, data = { params: Object.assign({}, E.DEFAULTS), positions: r.pos, cash: r.cash || 0, fx: r.fx || 0, base: r.base || "USD" };
   if (PF.active && PF.active.id === entry.id) { PF.active = null; PF.key = null; }
   writeProfile(entry, null, data).then(function () {
     if (isNew) { PF.index.push(entry); saveIndex(); }
@@ -934,19 +945,19 @@ var ACT = { sell: ["crit", "▼ Sprzedaj"], watch: ["warn", "◆ Obserwuj"], buy
 function shares(x) { return x.toLocaleString("pl-PL", { maximumFractionDigits: 4 }); }
 function renderPortfolio() {
   if (!R) return;
-  var A = E.actions(M, R, ST, liveMap()), h = "", byType = {}, known = A.items.filter(function (x) { return x.p && x.type !== "nodata"; });
+  var A = E.actions(M, R, { positions: ST.positions, cash: cashUsd(), fx: FX() }, liveMap()), h = "", byType = {}, known = A.items.filter(function (x) { return x.p && x.type !== "nodata"; });
   A.items.forEach(function (x) { (byType[x.type] = byType[x.type] || []).push(x); });
   function act(type, what, why) { return '<div class="act"><span class="pill ' + ACT[type][0] + '" data-tip="a-' + type + '">' + ACT[type][1] + '</span><span class="what">' + what + '</span><span class="why">' + why + "</span></div>"; }
   if (!ST.positions.length) h += '<p style="margin:0">Nie masz jeszcze wpisanych pozycji. Dodaj je poniżej pojedynczo albo wklej cały portfel jako tekst. Do tego czasu lista pokazuje tylko spółki, które reguły kupiłyby teraz.</p><p style="margin:0"><button class="chip primary" type="button" data-goto-io data-tip="io-import">Wklej portfel z tekstu</button></p>';
   (byType.sell || []).forEach(function (x) {
-    h += act("sell", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · całą pozycję: " + shares(x.p.qty) + " akcji, około " + money(x.value),
+    h += act("sell", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · całą pozycję: " + shares(x.p.qty) + " akcji, około " + mon(x.value),
       "Powód: " + E.WHY[x.sig.why] + ". " + (x.fresh ? "Sygnał z zamknięcia " + dstr(M.dates[x.sig.i]) + ", zlecenie na otwarciu najbliższej sesji." : "Zaległy sygnał z " + dstr(M.dates[x.sig.i]) + ": reguły zamknęłyby tę pozycję już wtedy."));
   });
   (byType.watch || []).forEach(function (x) {
-    h += act("watch", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · kurs " + price(x.close) + " $ jest poniżej progu sprzedaży " + price(x.stop) + " $", "Reguły oceniają sygnały na zamknięciu ostatniej sesji tygodnia. Do tego czasu nic nie rób.");
+    h += act("watch", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · kurs " + price(x.close) + unit(x.cur) + " jest poniżej progu sprzedaży " + price(x.stop) + unit(x.cur), "Reguły oceniają sygnały na zamknięciu ostatniej sesji tygodnia. Do tego czasu nic nie rób.");
   });
   (byType.buy || []).forEach(function (x) {
-    var size = !isFinite(x.amount) ? "za " + pct(A.weight, 1) + " kapitału" : x.amount < 1 ? "brak wolnej gotówki na zakup" : "za około " + money(x.amount) + ", czyli około " + nf(x.shares, 2) + " akcji przy kursie " + price(x.close) + " $";
+    var size = !isFinite(x.amount) ? "za " + pct(A.weight, 1) + " kapitału" : x.amount < 1 ? "brak wolnej gotówki na zakup" : "za około " + mon(x.amount) + ", czyli około " + nf(x.shares, 2) + " akcji przy kursie " + price(x.close) + " $";
     h += act("buy", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · " + size, "Spełnia wszystkie warunki kupna" + (x.fresh ? " od ostatniej oceny" : " już od wcześniejszych ocen") + (isFinite(x.mom) ? ". Kurs przez " + P.momMonths + " mies.: " + pc(x.mom, 1, true) : "") + ".");
   });
   if (byType.hold) h += act("hold", byType.hold.map(function (x) { return "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b>"; }).join(", "), "Żaden warunek sprzedaży nie zadziałał. Progi sprzedaży są w tabeli poniżej.");
@@ -958,20 +969,21 @@ function renderPortfolio() {
   $("todo").innerHTML = h;
   $("todo-note").textContent = "Polecenia wynikają z reguł ustawionych w zakładce Strategia i notowań z " + dstr(M.dates[N - 1]) + ". To wynik Twoich reguł, a nie rekomendacja inwestycyjna.";
   var pnl = A.value - A.cost;
-  function zl(x) { return ST.fx > 0 ? " <i>(" + nf(Math.round(x * ST.fx), 0) + " zł)</i>" : ""; }
-  $("pf-sum").innerHTML = "<span>Wartość pozycji <b>" + money(A.value) + "</b>" + zl(A.value) + "</span><span>Gotówka <b>" + money(A.cash) + "</b>" + zl(A.cash) + "</span><span data-tip='pf-total'>Razem <b>" + money(A.total) + "</b>" + zl(A.total) + "</span>" +
-    (known.length ? '<span>Wynik otwartych pozycji <b class="' + cls(pnl) + '">' + (pnl > 0 ? "+" : "") + money(pnl).replace("-", "−") + " (" + pct(A.cost > 0 ? pnl / A.cost : 0, 1, true) + ")</b></span>" : "");
+  var zl = mon2;
+  $("pf-sum").innerHTML = "<span>Wartość pozycji <b>" + mon(A.value) + "</b>" + zl(A.value) + "</span><span>Gotówka <b>" + mon(A.cash) + "</b>" + zl(A.cash) + "</span><span data-tip='pf-total'>Razem <b>" + mon(A.total) + "</b>" + zl(A.total) + "</span>" +
+    (known.length ? '<span>Wynik otwartych pozycji <b class="' + cls(pnl) + '">' + (pnl > 0 ? "+" : "") + mon(pnl).replace("-", "−") + " (" + pct(A.cost > 0 ? pnl / A.cost : 0, 1, true) + ")</b></span>" : "");
   var rows = A.items.filter(function (x) { return x.p; }).map(function (x) {
-    var nd = x.type === "nodata";
+    var nd = x.type === "nodata", u = unit(x.cur);
     var hist = M.tickers.some(function (t) { return t.s === x.s; });
-    return "<tr><td>" + (hist ? "<button class='symlink' type='button' data-chart='" + esc(x.s) + "' data-pos='" + esc(x.p.id) + "' data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</button>" : "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b>") + "</td><td class='num'>" + dstr(x.p.date.replace(/-/g, "")) + "</td><td class='num'>" + price(x.p.px) + "</td><td class='num'>" + shares(x.p.qty) + "</td><td class='num'>" + (nd && !x.hasPx ? "–" : price(x.close)) + "</td><td class='num'>" + money(x.value) +
-      "</td><td class='num " + (nd && !x.hasPx ? "" : cls(x.ret)) + "'>" + (nd && !x.hasPx ? "–" : pct(x.ret, 1, true)) + "</td><td class='num'>" + (nd || isNaN(x.stop) ? "–" : price(x.stop)) + "</td><td class='num'>" + (nd || isNaN(x.toStop) ? "–" : x.toStop >= 0 ? "przekroczony" : pct(-x.toStop, 1)) +
+    return "<tr><td>" + (hist ? "<button class='symlink' type='button' data-chart='" + esc(x.s) + "' data-pos='" + esc(x.p.id) + "' data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</button>" : "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b>") + "</td><td class='num'>" + dstr(x.p.date.replace(/-/g, "")) + "</td><td class='num'>" + price(x.p.px) + u + "</td><td class='num'>" + shares(x.p.qty) + "</td><td class='num'>" + (nd && !x.hasPx ? "–" : price(x.close) + u) + "</td><td class='num'>" + mon(x.value) +
+      "</td><td class='num " + (nd && !x.hasPx ? "" : cls(x.ret)) + "'>" + (nd && !x.hasPx ? "–" : pct(x.ret, 1, true)) + "</td><td class='num'>" + (nd || isNaN(x.stop) ? "–" : price(x.stop) + u) + "</td><td class='num'>" + (nd || isNaN(x.toStop) ? "–" : x.toStop >= 0 ? "przekroczony" : pct(-x.toStop, 1)) +
       "</td><td><span class='pill " + ACT[x.type][0] + "' data-tip='a-" + (x.hasPx ? "liveonly" : x.type) + "'>" + (x.hasPx ? "○ Tylko kurs" : ACT[x.type][1]) + "</span></td><td><button class='icon-btn edit' type='button' data-edit='" + esc(x.p.id) + "' data-tip='pf-edit' aria-label='Edytuj pozycję " + esc(x.s) + "'>Edytuj</button> <button class='icon-btn' type='button' data-del='" + esc(x.p.id) + "' data-tip='pf-del' aria-label='Usuń pozycję " + esc(x.s) + "'>Usuń</button></td></tr>";
   });
-  $("pf-table").innerHTML = "<thead><tr><th data-tip='pt-sym'>Spółka</th><th data-tip='pt-date'>Kupno</th><th data-tip='pt-px'>Cena ($)</th><th data-tip='pt-qty'>Liczba</th><th data-tip='c-close'>Kurs ($)</th><th data-tip='pt-val'>Wartość</th><th data-tip='pt-ret'>Wynik</th><th data-tip='c-stop'>Próg sprzedaży</th><th data-tip='c-tostop'>Zapas do progu</th><th data-tip='pc-state'>Stan</th><th></th></tr></thead><tbody>" +
+  $("pf-table").innerHTML = "<thead><tr><th data-tip='pt-sym'>Spółka</th><th data-tip='pt-date'>Kupno</th><th data-tip='pt-px'>Cena</th><th data-tip='pt-qty'>Liczba</th><th data-tip='c-close'>Kurs</th><th data-tip='pt-val'>Wartość</th><th data-tip='pt-ret'>Wynik</th><th data-tip='c-stop'>Próg sprzedaży</th><th data-tip='c-tostop'>Zapas do progu</th><th data-tip='pc-state'>Stan</th><th></th></tr></thead><tbody>" +
     (rows.length ? rows.join("") : "<tr><td colspan='11'>Brak pozycji.</td></tr>") + "</tbody>";
   var cashEl = $("pf-cash"); if (document.activeElement !== cashEl) cashEl.value = ST.cash || "";
   var fxEl = $("pf-fx"); if (document.activeElement !== fxEl) fxEl.value = ST.fx || "";
+  fxEl.placeholder = nf(FX(), 2) + (M.fx ? " z notowań" : ""); $("pf-base").value = ST.base; $("pf-cash-cur").textContent = ST.base === "PLN" ? "zł" : "$"; $("pf-px-cur").textContent = unitOf($("pf-sym").value).trim();
   setMode(); liveSync();
 }
 /* ---------- Kursy na żywo (Finnhub, własny darmowy klucz; tylko poza Claude) ---------- */
@@ -979,7 +991,7 @@ var CAN_LIVE = !window.claude && !/claude/i.test(location.hostname);
 var LIVE = { key: "", px: {}, subs: {}, ws: null, poll: 0, retry: 0, rt: 0, last: 0, err: "",
   base: lsGet("ag-finnhub-url") || "https://finnhub.io/api/v1", wsUrl: lsGet("ag-finnhub-ws") || "wss://ws.finnhub.io" };
 function liveMap() { if (!CAN_LIVE || !LIVE.key) return null; var m = {}; for (var s in LIVE.px) m[s] = LIVE.px[s]; return m; }
-function liveWanted() { var w = {}; if (PF.active) ST.positions.slice(0, 40).forEach(function (p) { w[p.s] = true; }); return w; }
+function liveWanted() { var w = {}; if (PF.active) ST.positions.slice(0, 40).forEach(function (p) { var t = tick(p.s); if (!t || !t.m) w[p.s] = true; }); return w; }   // GPW i Londyn: tylko kursy zamknięcia
 function liveStatus() {
   var el = $("live-status"); if (!el) return;
   var on = !!LIVE.key; $("live-off").hidden = !on; $("live-save").textContent = on ? "Zmień klucz" : "Włącz kursy na żywo";
@@ -1043,8 +1055,12 @@ function initLive() {
   liveStart();
 }
 function initPortfolio() {
-  $("pf-sym").innerHTML = M.tickers.map(function (t) { return '<option value="' + t.s + '">' + t.s + " · " + esc(t.n) + (t.x ? " (same kursy)" : "") + "</option>"; }).join("") + '<option value="">Inna spółka…</option>';
-  $("pf-sym").addEventListener("change", function () { $("pf-other-wrap").hidden = this.value !== ""; });
+  $("pf-sym").innerHTML = M.tickers.map(function (t) { return '<option value="' + t.s + '">' + t.s + " · " + esc(t.n) + (t.m === "GPW" ? " (GPW, zł)" : t.m === "LSE" ? " (Londyn, $)" : t.x ? " (same kursy)" : "") + "</option>"; }).join("") + '<option value="">Inna spółka…</option>';
+  $("pf-sym").addEventListener("change", function () { $("pf-other-wrap").hidden = this.value !== ""; $("pf-px-cur").textContent = unitOf(this.value).trim(); });
+  $("pf-base").addEventListener("change", function () {   // zmiana waluty portfela przelicza wpisaną gotówkę po bieżącym kursie
+    var to = this.value === "PLN" ? "PLN" : "USD"; if (to === ST.base) return;
+    ST.cash = Math.round((to === "PLN" ? ST.cash * FX() : ST.cash / FX()) * 100) / 100; ST.base = to; persist(); renderPortfolio();
+  });
   $("pf-form").addEventListener("submit", function (e) {
     e.preventDefault();
     var s = ($("pf-sym").value || $("pf-other").value).trim().toUpperCase(), d = $("pf-date").value, px = +$("pf-px").value, qty = +$("pf-qty").value, err = "";
@@ -1080,7 +1096,7 @@ function initPortfolio() {
   $("pf-import").addEventListener("click", function () {
     var pr = parsePortfolioText($("pf-io").value), pos = pr.pos, cash = pr.cash, fx = pr.fx, err = pr.err;
     if (err) { $("pf-io-msg").textContent = err + " Nic nie zostało zmienione."; return; }
-    ST.positions = pos; if (cash !== null) ST.cash = cash; if (fx !== null) ST.fx = fx;
+    ST.positions = pos; if (cash !== null) ST.cash = cash; if (fx !== null) ST.fx = fx; if (pr.base !== null) ST.base = pr.base;
     endEdit(); persist(); renderPortfolio();
     $("pf-io-msg").textContent = "Wczytano " + pos.length + " " + (pos.length === 1 ? "pozycję" : "pozycji") + (cash !== null ? " i gotówkę" : "") + ". Każdą pozycję możesz poprawić przyciskiem Edytuj.";
   });
@@ -1090,7 +1106,7 @@ function initPortfolio() {
       var p0 = ST.positions.filter(function (p) { return p.id === ed.dataset.edit; })[0]; if (!p0) return;
       var known = M.tickers.some(function (t) { return t.s === p0.s; });
       ui.editId = p0.id; $("pf-sym").value = known ? p0.s : ""; $("pf-other-wrap").hidden = known; $("pf-other").value = known ? "" : p0.s;
-      $("pf-date").value = p0.date; $("pf-px").value = p0.px; $("pf-qty").value = p0.qty;
+      $("pf-date").value = p0.date; $("pf-px").value = p0.px; $("pf-qty").value = p0.qty; $("pf-px-cur").textContent = unitOf(p0.s).trim();
       $("pf-form-title").textContent = "Edytuj pozycję " + p0.s; $("pf-add").textContent = "Zapisz zmiany"; $("pf-cancel").hidden = false; $("pf-err").hidden = true;
       hideHint(); $("pf-form").scrollIntoView({ block: "center" }); $("pf-px").focus({ preventScroll: true }); return;
     }
@@ -1100,7 +1116,7 @@ function initPortfolio() {
     hideHint(); persist(); renderPortfolio();
   });
   $("pf-cash").addEventListener("input", function () { var v = +this.value; ST.cash = v > 0 ? v : 0; persist(); renderPortfolio(); });
-  $("pf-fx").addEventListener("input", function () { var v = +this.value; if (v > 0 && v < 100) { ST.fx = v; persist(); renderPortfolio(); } });
+  $("pf-fx").addEventListener("input", function () { var v = +this.value; ST.fx = v > 0 && v < 100 ? v : 0; persist(); renderPortfolio(); });   // puste pole = kurs z notowań
   $("todo").addEventListener("click", function (e) { if (e.target.closest("[data-goto-io]")) { $("pf-io").scrollIntoView({ block: "center" }); $("pf-io").focus({ preventScroll: true }); } });
 }
 
@@ -1144,14 +1160,15 @@ var TIPS = {
   "h-todo": "Lista konkretnych poleceń na dziś: co sprzedać, co kupić i co trzymać. Wynika z reguł ze Strategii zastosowanych do Twoich pozycji.",
   "h-pos": "Twoje pozycje z bieżącą wyceną, wynikiem i progiem, przy którym reguły każą sprzedać.",
   "h-add": "Dodaje pozycję do portfela. Podaj dane z potwierdzenia transakcji u brokera.",
-  "pf-sym": "Spółka, którą kupiłeś. Dla spółek spoza listy aplikacja zapisze pozycję, ale nie policzy dla niej sygnałów.",
+  "pf-sym": "Spółka albo ETF, który kupiłeś: z USA, z GPW lub z Londynu. Dla walorów spoza listy aplikacja zapisze pozycję, ale nie policzy dla niej sygnałów.",
   "pf-date": "Dzień zakupu. Od tej daty aplikacja śledzi najwyższy kurs, od którego liczy dopuszczalny spadek.",
-  "pf-px": "Cena jednej akcji w dolarach, po której kupiłeś.",
+  "pf-px": "Cena jednej akcji, po której kupiłeś, w walucie notowań: dolary dla USA, złote dla GPW.",
   "pf-qty": "Liczba kupionych akcji, może być ułamkowa.",
   "pf-del": "Usuwa pozycję z portfela, na przykład po jej sprzedaży.",
-  cash: "Gotówka w dolarach czekająca na rachunku. Aplikacja używa jej do wyliczenia kwot zakupu.",
-  fx: "Kurs służy tylko do pokazania wartości portfela w złotych. Wpisz aktualny kurs ze swojego rachunku albo z NBP.",
-  "pf-total": "Wartość wszystkich pozycji razem z wolną gotówką. Kwota w nawiasie to przeliczenie na złote po wpisanym kursie.",
+  cash: "Gotówka czekająca na rachunku, w walucie portfela. Aplikacja używa jej do wyliczenia kwot zakupu.",
+  base: "Waluta, w której aplikacja pokazuje wartość pozycji, gotówkę i sumę portfela. Ceny i progi sprzedaży zostają w walucie notowań każdej spółki.",
+  fx: "Kurs do przeliczania między dolarami a złotymi w wartościach i sumie portfela. Puste pole oznacza kurs z ostatnich notowań, a wpisana liczba go zastępuje.",
+  "pf-total": "Wartość wszystkich pozycji razem z wolną gotówką. Kwota w nawiasie to przeliczenie na drugą walutę po kursie dolara.",
   store: "Pokazuje, czyj portfel jest otwarty i czy jest zaszyfrowany hasłem.",
   who: "Pokazuje, czyj portfel jest otwarty. Kliknij, żeby przejść do listy osób.",
   "h-people": "Każda osoba ma własny portfel i własne ustawienia strategii. Inne osoby korzystające z tej przeglądarki nie zobaczą portfela chronionego hasłem.",
@@ -1225,16 +1242,16 @@ var TIPS = {
   "st-hold": "Spółka dostała wcześniej sygnał kupna i żaden warunek sprzedaży jeszcze nie zadziałał.",
   "st-sell": "Sygnał sprzedaży z ostatnich 5 sesji: zadziałał jeden z warunków sprzedaży.",
   "st-out": "Brak pozycji: spółka nie spełnia teraz warunków kupna albo trwa przerwa po sprzedaży.",
-  "c-close": "Ostatni kurs w dolarach: na żywo, gdy kursy na żywo są włączone, a w przeciwnym razie z ostatniego zamknięcia.",
+  "c-close": "Ostatni kurs w walucie notowań: na żywo dla spółek z USA, gdy kursy na żywo są włączone, a w pozostałych przypadkach z ostatniego zamknięcia.",
   "c-since": "Zmiana kursu od ceny, po której zostałby wykonany zakup po ostatnim sygnale kupna.",
   "c-stop": "Kurs, przy którym Twoje reguły każą sprzedać. To wyższa z dwóch wartości: kurs po dopuszczalnym spadku od szczytu albo średnia długoterminowa pomniejszona o margines.",
   "c-tostop": "O ile procent kurs może jeszcze spaść, zanim dojdzie do progu sprzedaży. Słowo „przekroczony” oznacza, że kurs już jest poniżej progu.",
-  "h-live": "Pobiera bieżące kursy Twoich spółek z serwisu Finnhub, na bieżąco w czasie sesji w USA. Wymaga własnego darmowego klucza.",
+  "h-live": "Pobiera bieżące kursy Twoich spółek z USA z serwisu Finnhub, w czasie sesji. Wymaga własnego darmowego klucza, a walory z GPW i Londynu zostają przy kursach zamknięcia.",
   "live-key": "Klucz dostępu z Twojego konta Finnhub. Jest zapisany tylko w tej przeglądarce i nie trafia do repozytorium.",
   "a-liveonly": "Aplikacja ma bieżący kurs tej spółki, ale nie ma jej historii notowań, więc nie liczy dla niej progu sprzedaży.",
   "pt-sym": "Symbol giełdowy spółki, na przykład AAPL to Apple.",
   "pt-date": "Data zakupu. Od niej aplikacja śledzi najwyższy kurs, od którego liczy dopuszczalny spadek.",
-  "pt-px": "Cena jednej akcji w dolarach, po której kupiłeś.",
+  "pt-px": "Cena jednej akcji, po której kupiłeś, w walucie notowań: dolary dla USA, złote dla GPW.",
   "pt-qty": "Liczba posiadanych akcji, może być ułamkowa.",
   "pt-val": "Liczba akcji razy ostatni kurs, czyli obecna wartość pozycji. Dla spółki bez notowań liczona po cenie zakupu.",
   "pt-ret": "Zmiana kursu względem Twojej ceny zakupu w procentach.",
@@ -1325,7 +1342,7 @@ function renderInstruction() {
     '<div class="card"><h2>Portfel</h2><p style="margin-bottom:10px">Kapitał początkowy w Strategii służy tylko do testu na danych historycznych. Prawdziwe pozycje i gotówkę wpisujesz w Portfelu, a notowania odświeżają się automatycznie po każdej sesji w USA.</p><div class="scroll"><table class="ptab">' +
     '<tr><th colspan="2">Do zrobienia</th></tr>' + rows([["Lista poleceń", "h-todo"], ["▼ Sprzedaj", "a-sell"], ["▲ Kup", "a-buy"], ["◆ Obserwuj", "a-watch"], ["● Trzymaj", "a-hold"], ["○ Bez danych", "a-nodata"]]) +
     '<tr><th colspan="2">Pozycje</th></tr>' + rows([["Tabela pozycji", "h-pos"], ["Spółka", "pt-sym"], ["Kupno", "pt-date"], ["Cena ($)", "pt-px"], ["Liczba", "pt-qty"], ["Kurs ($)", "c-close"], ["Wartość", "pt-val"], ["Wynik", "pt-ret"], ["Próg sprzedaży", "c-stop"], ["Zapas do progu", "c-tostop"], ["Stan", "pc-state"], ["Edytuj", "pf-edit"], ["Usuń", "pf-del"]]) +
-    '<tr><th colspan="2">Dodawanie</th></tr>' + rows([["Spółka", "pf-sym"], ["Data zakupu", "pf-date"], ["Cena zakupu", "pf-px"], ["Liczba akcji", "pf-qty"], ["Wolna gotówka", "cash"], ["Kurs dolara", "fx"], ["Razem", "pf-total"], ["Miejsce zapisu", "store"]]) +
+    '<tr><th colspan="2">Dodawanie</th></tr>' + rows([["Spółka", "pf-sym"], ["Data zakupu", "pf-date"], ["Cena zakupu", "pf-px"], ["Liczba akcji", "pf-qty"], ["Waluta portfela", "base"], ["Wolna gotówka", "cash"], ["Kurs dolara", "fx"], ["Razem", "pf-total"], ["Miejsce zapisu", "store"]]) +
     '<tr><th colspan="2">Kursy na żywo</th></tr>' + rows([["Kursy na żywo", "h-live"], ["Klucz Finnhub", "live-key"], ["○ Tylko kurs", "a-liveonly"]]) +
     '<tr><th colspan="2">Przenoszenie</th></tr>' + rows([["Portfel jako tekst", "h-io"], ["Pokaż mój portfel jako tekst", "io-export"], ["Wczytaj portfel z tekstu", "io-import"], ["Skopiuj link z portfelem", "io-link"]]) + "</table></div></div>" +
     '<div class="card"><h2>Osoby</h2><p style="margin-bottom:10px">Z aplikacji może korzystać kilka osób na jednym urządzeniu. Każda ma własny portfel i własne ustawienia, a dane są zapisane tylko w tej przeglądarce.</p><div class="scroll"><table class="ptab">' +
@@ -1368,7 +1385,7 @@ function initWykres() {
   P = c.params || Object.assign({}, E.DEFAULTS); WK.pos = c.positions[0] || null; R = E.run(M, P);
   $("wk-range").addEventListener("click", function (e) { var b = e.target.closest("[data-wk]"); if (!b) return; WK.range = b.dataset.wk; renderWykres(); });
   renderWykres();
-  if (CAN_LIVE && WK.t >= 0) {   // jedno zapytanie na minutę; strumień na żywo zostaje w głównym oknie
+  if (CAN_LIVE && WK.t >= 0 && !M.tickers[WK.t].m) {   // jedno zapytanie na minutę; strumień na żywo zostaje w głównym oknie
     LIVE.key = lsGet("ag-finnhub") || "";
     if (LIVE.key) { var ask = function () { liveQuote(sym).then(renderWykres, function () {}); }; ask(); setInterval(ask, 60000); }
   }
@@ -1383,20 +1400,20 @@ function renderWykres() {
     $("wk-sub").textContent = sym ? "Aplikacja nie ma historii notowań tej spółki, więc nie narysuje wykresu." : "Otwórz wykres, klikając symbol spółki w tabeli Portfela.";
     $("wk-range").hidden = true; ["wk-legend", "wk-chart", "wk-facts", "wk-note"].forEach(function (id) { $(id).innerHTML = ""; }); return;
   }
-  var I = R.ind[WK.t], S = R.signals[WK.t], live = LIVE.px[sym] > 0 ? LIVE.px[sym] : NaN, lastC = T.c[N - 1], now = isFinite(live) ? live : lastC;
+  var U = unit(T.cur), I = R.ind[WK.t], S = R.signals[WK.t], live = LIVE.px[sym] > 0 ? LIVE.px[sym] : NaN, lastC = T.c[N - 1], now = isFinite(live) ? live : lastC;
   var len = WKR.filter(function (r) { return r[0] === WK.range; })[0][2], a = len ? Math.max(T.start, N - 1 - len) : T.start, idx = [], i;
   var step = Math.max(1, Math.ceil((N - a) / 1600)); for (i = N - 1; i >= a; i -= step) idx.unshift(i);
   var lo = Infinity, hi = -Infinity, first = NaN; for (i = a; i < N; i++) { var v = T.c[i]; if (isFinite(v)) { if (isNaN(first)) first = v; if (v < lo) lo = v; if (v > hi) hi = v; } }   // liczby z każdej sesji, także gdy wykres jest rysowany co kilka sesji
   var chg = now / first - 1;
   $("wk-title").textContent = T.n + " (" + sym + ")";
-  $("wk-sub").innerHTML = (isFinite(live) ? "Kurs teraz <b>" + price(live) + " $</b> · na żywo z " + new Date(LIVE.last).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }) + " · zamknięcie " + dstr(M.dates[N - 1]) + ": " + price(lastC) + " $" : "Kurs zamknięcia z " + dstr(M.dates[N - 1]) + ": <b>" + price(lastC) + " $</b>") +
+  $("wk-sub").innerHTML = (isFinite(live) ? "Kurs teraz <b>" + price(live) + U + "</b> · na żywo z " + new Date(LIVE.last).toLocaleTimeString("pl-PL", { hour: "2-digit", minute: "2-digit" }) + " · zamknięcie " + dstr(M.dates[N - 1]) + ": " + price(lastC) + U : "Kurs zamknięcia z " + dstr(M.dates[N - 1]) + ": <b>" + price(lastC) + U + "</b>") +
     (isFinite(chg) ? ' · <b class="' + cls(chg) + '">' + pct(chg, 1, true) + "</b> w wybranym okresie" : "");
   var ser = [{ name: "Kurs " + sym, color: "var(--accent)", get: function (k) { return T.c[k]; } }, { name: "Średnia z " + P.smaLong + " sesji", color: "var(--series-2)", get: function (k) { return I.smaL[k]; } }];
   if (P.useCross) ser.push({ name: "Średnia z " + P.smaFast + " sesji", color: "var(--series-3)", get: function (k) { return I.smaF[k]; } });
   var it = null, pos = WK.pos, vline = null, facts = [];
   if (pos) {
     var lm = null; if (isFinite(live)) { lm = {}; lm[sym] = live; }
-    it = E.actions(M, R, { positions: [pos], cash: 0, fx: 3.91 }, lm).items.filter(function (x) { return x.p; })[0] || null;
+    it = E.actions(M, R, { positions: [pos], cash: 0, fx: FX() }, lm).items.filter(function (x) { return x.p; })[0] || null;
     ser.push({ name: "Twoja cena zakupu", tag: "cena zakupu", color: "var(--muted)", dash: true, get: function () { return pos.px; } });
     if (it && isFinite(it.stop)) ser.push({ name: "Próg sprzedaży dziś", tag: "próg sprzedaży", color: "var(--crit)", dash: true, get: function () { return it.stop; } });
     var di = +pos.date.replace(/-/g, ""); for (i = 0; i < N; i++) if (M.dates[i] >= di) { vline = i; break; }
@@ -1406,13 +1423,13 @@ function renderWykres() {
   var span = hi - lo, dec = span < 0.4 ? 2 : span < 4 ? 1 : 0;
   if (idx.length < 2) $("wk-chart").innerHTML = '<p class="note">Za mało notowań, żeby narysować wykres.</p>';
   else drawChart($("wk-chart"), { idx: idx, h: Math.max(280, Math.min(window.innerHeight - 330, 620)), log: !len || len > 252, xm: !!len && len <= 252, series: ser, label: "Kurs " + sym + " ze średnią" + (pos ? ", ceną zakupu i progiem sprzedaży" : ""),
-    markers: marks, vline: vline, vlabel: "zakup", fmt: function (v) { return price(v) + " $"; }, axis: function (v) { return nf(v, v < 10 ? Math.max(1, dec) : dec); } });
-  facts.push("Okres: " + dstr(M.dates[a]) + " – " + dstr(M.dates[N - 1]) + ". Najwyższe zamknięcie " + price(hi) + " $, najniższe " + price(lo) + " $.");
+    markers: marks, vline: vline, vlabel: "zakup", fmt: function (v) { return price(v) + U; }, axis: function (v) { return nf(v, v < 10 ? Math.max(1, dec) : dec); } });
+  facts.push("Okres: " + dstr(M.dates[a]) + " – " + dstr(M.dates[N - 1]) + ". Najwyższe zamknięcie " + price(hi) + U + ", najniższe " + price(lo) + U + ".");
   if (isFinite(I.smaL[N - 1])) facts.push("Kurs względem średniej z " + P.smaLong + " sesji: " + pct(now / I.smaL[N - 1] - 1, 1, true) + ".");
-  if (it) facts.push("Twoja pozycja: " + shares(pos.qty) + " akcji z " + dstr(pos.date.replace(/-/g, "")) + " po " + price(pos.px) + " $, wynik " + pct(it.ret, 1, true) + "." +
-    (it.type !== "nodata" && isFinite(it.stop) ? " Próg sprzedaży " + price(it.stop) + " $, " + (it.toStop >= 0 ? "kurs jest poniżej progu" : "zapas " + pct(-it.toStop, 1)) + "." : "") + (it.type !== "nodata" ? " Stan według reguł: " + ACT[it.type][1].replace(/^\S+\s/, "") + "." : ""));
+  if (it) facts.push("Twoja pozycja: " + shares(pos.qty) + " akcji z " + dstr(pos.date.replace(/-/g, "")) + " po " + price(pos.px) + U + ", wynik " + pct(it.ret, 1, true) + "." +
+    (it.type !== "nodata" && isFinite(it.stop) ? " Próg sprzedaży " + price(it.stop) + U + ", " + (it.toStop >= 0 ? "kurs jest poniżej progu" : "zapas " + pct(-it.toStop, 1)) + "." : "") + (it.type !== "nodata" ? " Stan według reguł: " + ACT[it.type][1].replace(/^\S+\s/, "") + "." : ""));
   $("wk-facts").textContent = facts.join(" ");
-  $("wk-note").textContent = (marks.length ? "Trójkąty to sygnały Twojej strategii, a nie Twoje transakcje. " : T.x ? "Dla tej spółki aplikacja ma same kursy, bez danych o zyskach, więc nie pokazuje sygnałów kupna. " : "") + "Wykres rysuje kursy zamknięcia. To wynik reguł, a nie rekomendacja inwestycyjna.";
+  $("wk-note").textContent = (marks.length ? "Trójkąty to sygnały Twojej strategii, a nie Twoje transakcje. " : T.x ? "Dla tego waloru aplikacja ma same kursy, bez danych o zyskach, więc nie pokazuje sygnałów kupna. " : "") + "Wykres rysuje kursy zamknięcia. To wynik reguł, a nie rekomendacja inwestycyjna.";
 }
 document.addEventListener("click", function (e) { var c = e.target.closest ? e.target.closest("[data-chart]") : null; if (!c) return; e.preventDefault(); hideHint(); openChart(c.dataset.chart, c.dataset.pos || ""); });
 
