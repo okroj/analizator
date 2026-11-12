@@ -202,6 +202,7 @@ input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(-
 .welcome[hidden], .tour[hidden] { display: none; }
 .symlink { border: 0; background: none; padding: 0; font: inherit; font-weight: 700; color: inherit; cursor: pointer; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 3px; }
 .symlink:hover, .symlink:focus-visible { color: var(--accent); text-decoration-color: var(--accent); }
+body.solo #hints-toggle { margin-left: auto; }
 body.solo .top nav, body.solo #who, body.solo #tour-start, body.solo .welcome, body.solo .mini { display: none !important; }
 .wk-title { font-family: var(--font-display); font-stretch: 78%; font-size: 24px; font-weight: 700; line-height: 1.15; }
 .wk-sub { font-size: 14px; margin-top: 4px; color: var(--muted); } .wk-sub b { color: var(--ink); }
@@ -250,6 +251,7 @@ body.solo .top nav, body.solo #who, body.solo #tour-start, body.solo .welcome, b
     </div>
     <button class="chip tourbtn" id="who" type="button" data-tip="who"></button>
     <button class="chip tourbtn2" id="tour-start" type="button" data-tip="tour">Samouczek</button>
+    <button class="chip tourbtn2" id="hints-toggle" type="button" data-tip="hints" aria-pressed="true">Podpowiedzi: włączone</button>
     <nav aria-label="Widoki">
       <a href="#strategia" id="nav-strategia" data-tip="nav-strategia">Strategia</a>
       <a href="#skaner" id="nav-skaner" data-tip="nav-skaner">Skaner</a>
@@ -1249,6 +1251,7 @@ var TIPS = {
   "range-all": "Pokazuje na wykresie cały zakres testu.",
   "wk-open": "Otwiera wykres tej spółki w osobnym oknie, z wyborem okresu od 3 miesięcy do całej historii. To samo robi kliknięcie symbolu spółki w tabeli Portfela.",
   "wk-range": "Zmienia okres pokazany na wykresie.",
+  "hints": "Włącza albo wyłącza opisy, które pojawiają się po najechaniu myszką na element. Samouczek i zakładka Instrukcja działają niezależnie od tego ustawienia.",
   tour: "Uruchamia samouczek, który krok po kroku pokazuje najważniejsze miejsca aplikacji."
 };
 var NAMES2 = { V: "Visa", MA: "Mastercard", GOOGL: "Alphabet", AMD: "AMD", INTC: "Intel", ORCL: "Oracle", UBER: "Uber", JPM: "JPMorgan Chase", BAC: "Bank of America", KO: "Coca-Cola", PEP: "PepsiCo", DIS: "Disney", NKE: "Nike", PYPL: "PayPal", COIN: "Coinbase", BABA: "Alibaba", "BRK.B": "Berkshire Hathaway", JNJ: "Johnson & Johnson", PFE: "Pfizer", XOM: "ExxonMobil", WMT: "Walmart", COST: "Costco", MCD: "McDonald's", BA: "Boeing", IBM: "IBM", CSCO: "Cisco", QCOM: "Qualcomm", ASML: "ASML", SHOP: "Shopify", SPOT: "Spotify", ABNB: "Airbnb", SNOW: "Snowflake", CRWD: "CrowdStrike", RKLB: "Rocket Lab", SOFI: "SoFi", HOOD: "Robinhood", PKN: "Orlen", PKO: "PKO Bank Polski", PZU: "PZU", CDR: "CD Projekt", KGH: "KGHM", ALE: "Allegro", LPP: "LPP", DNP: "Dino Polska", PEO: "Bank Pekao", XTB: "XTB" };
@@ -1256,9 +1259,14 @@ function symName(s) {
   var t = M.tickers.filter(function (x) { return x.s === s; })[0];
   return t ? t.n + " (" + s + ")" : NAMES2[s] ? NAMES2[s] + " (" + s + ")" : "Aplikacja nie zna pełnej nazwy spółki o symbolu " + s + ".";
 }
-var hint = $("hint"), hintFor = null;
+var hint = $("hint"), hintFor = null, HINTS = lsGet("ag-podpowiedzi") !== "0";   // wybór wspólny dla całej przeglądarki
 function hideHint() { hint.hidden = true; hintFor = null; }
+function hintsSync() { var b = $("hints-toggle"); b.setAttribute("aria-pressed", HINTS); b.textContent = "Podpowiedzi: " + (HINTS ? "włączone" : "wyłączone"); }
+$("hints-toggle").addEventListener("click", function () { HINTS = !HINTS; lsSet("ag-podpowiedzi", HINTS ? "1" : "0"); hintsSync(); hideHint(); });
+window.addEventListener("storage", function (e) { if (e.key === "ag-podpowiedzi") { HINTS = e.newValue !== "0"; hintsSync(); if (!HINTS) hideHint(); } });
+hintsSync();
 function showHint(el) {
+  if (!HINTS && el.id !== "hints-toggle") { if (hintFor) hideHint(); return; }   // przełącznik zawsze tłumaczy sam siebie
   var key = el.getAttribute("data-tip"), t = key.indexOf("sym:") === 0 ? symName(key.slice(4)) + (el.hasAttribute("data-chart") ? ". Kliknij, żeby otworzyć wykres w nowym oknie." : "") : TIPS[key]; if (!t) { hideHint(); return; }
   hint.textContent = t; hint.hidden = false; hintFor = el;
   var r = el.getBoundingClientRect(), w = hint.offsetWidth, h = hint.offsetHeight;
@@ -1288,7 +1296,7 @@ function renderInstruction() {
   });
   $("instrukcja").innerHTML =
     '<div class="card"><h2>Do czego służy aplikacja</h2><p>Analizator giełdy sprawdza Twoje reguły kupna i sprzedaży na danych historycznych, a potem stosuje je do aktualnych notowań. Nie przewiduje kursów. Pilnuje, żeby decyzje wynikały z reguł, które wcześniej przetestowałeś.</p>' +
-    '<p style="margin-top:8px">Każdy element ma krótką podpowiedź. Na komputerze najedź na niego myszką, a na telefonie go dotknij.</p><p style="margin-top:12px"><button class="chip primary" type="button" data-tour-start data-tip="tour">Uruchom samouczek</button></p></div>' +
+    '<p style="margin-top:8px">Każdy element ma krótką podpowiedź. Na komputerze najedź na niego myszką, a na telefonie go dotknij. Podpowiedzi wyłączysz i włączysz przyciskiem „Podpowiedzi” u góry strony.</p><p style="margin-top:12px"><button class="chip primary" type="button" data-tour-start data-tip="tour">Uruchom samouczek</button></p></div>' +
     '<div class="card"><h2>Kolejność pracy</h2><ol>' +
     "<li>W zakładce Strategia wybierz gotowy zestaw albo ustaw własne warunki kupna i sprzedaży.</li>" +
     "<li>Przeczytaj werdykt i porównaj zysk roczny oraz obsunięcie strategii z samym trzymaniem spółek.</li>" +
