@@ -19,7 +19,19 @@
     capital: 10000, maxPos: 5,
     useRisk: false, riskPct: 2,                     // % kapitału ryzykowany na pozycję
     cost: 0.2,                                      // % wartości każdej transakcji (prowizja + poślizg)
-    splitYear: 2019
+    splitYear: 2019,
+    /* zestaw reguł: "classic" (średnie i zysk spółki) albo "tx4" (sygnały świecowe, strefy, dwie ramy czasowe) */
+    mode: "classic",
+    xFrames: "WM",                                  // ramy zarządzania + charakteru: "DW" dzień i tydzień, "WM" tydzień i miesiąc
+    xFws: true, xFwd: true, xTr: true,              // sygnały: fałszywe wybicie pojedyncze, podwójne, trójka
+    xUseReact: true, xReact: 50,                    // świeca reakcji: zamknięcie w górnych (dla spadków: dolnych) X% zakresu świecy
+    xUseChar: true,                                 // kupuj tylko, gdy ostatni sygnał na ramach charakteru był wzrostowy
+    xUseSup: true, xSupTol: 2,                      // sygnał przy strefie wsparcia, tolerancja w %
+    xUseRoom: false, xRoom: 5,                      // minimalne miejsce do najbliższego oporu w %
+    xPivot: 2, xZoneMem: 150,                       // punkt zwrotny: świec z każdej strony; pamięć stref w świecach
+    xExitSig: true, xUseDef: true, xExitChar: false, xUseTrail: false, xTrail: 25,
+    xCool: 2,                                       // przerwa w tygodniach przed ponownym zakupem tego samego waloru
+    xAll: true                                      // test także na walorach z samymi kursami (GPW, ETF-y, złoto)
   };
 
   function ymd(n) { return new Date(Date.UTC(Math.floor(n / 10000), Math.floor(n / 100) % 100 - 1, n % 100)); }
@@ -80,10 +92,10 @@
     return null;
   }
 
+  /* poniedziałek tygodnia, do którego należy sesja (w dniach od epoki) */
+  function weekOf(n) { var d = ymd(n), day = Math.round(d / 864e5); return day - ((d.getUTCDay() + 6) % 7); }
   function evalDays(M, P) {
     var N = M.dates.length, ev = new Uint8Array(N);
-    /* poniedziałek tygodnia, do którego należy sesja (w dniach od epoki) */
-    function weekOf(n) { var d = ymd(n), day = Math.round(d / 864e5); return day - ((d.getUTCDay() + 6) % 7); }
     for (var i = 0; i < N; i++) {
       if (!P.weekly) { ev[i] = 1; continue; }
       if (i + 1 < N) { if (weekOf(M.dates[i + 1]) !== weekOf(M.dates[i])) ev[i] = 1; }
@@ -126,25 +138,205 @@
     return st;
   }
 
+  /* ================= Tx4 (szkic) =================
+     Klocki z techniki Tx4: sygnały z 2–3 świec, strefy wsparcia i oporu ze zmianą funkcji, ramy zarządzania i charakteru.
+     Sposób złożenia klocków w decyzje kupna i sprzedaży jest roboczy i w całości sterowany parametrami x*. */
+  /* Świece wybranych ram z notowań dziennych. at[i] = numer świecy zakończonej sesją i (albo -1), of[i] = ostatnia zakończona świeca na zamknięciu sesji i. */
+  function candles(M, T, frame) {
+    var N = M.dates.length, O = [], H = [], L = [], C = [], end = [], key = null, n = -1, i;
+    for (i = T.start; i < N; i++) {
+      var d = M.dates[i], k = frame === "D" ? i : frame === "W" ? weekOf(d) : Math.floor(d / 100);
+      var hi = T.h && T.h[i] != null ? T.h[i] : Math.max(T.o[i], T.c[i]), lo = T.l && T.l[i] != null ? T.l[i] : Math.min(T.o[i], T.c[i]);
+      if (k !== key) { key = k; n++; O[n] = T.o[i]; H[n] = hi; L[n] = lo; }
+      else { if (hi > H[n]) H[n] = hi; if (lo < L[n]) L[n] = lo; }
+      C[n] = T.c[i]; end[n] = i;
+    }
+    n++;
+    var lastDone = true;
+    if (n && frame !== "D") {
+      var ld = ymd(M.dates[N - 1]);
+      if (frame === "W") lastDone = ld.getUTCDay() === 5;
+      else { var nx = new Date(ld.getTime() + 864e5); while (nx.getUTCDay() === 0 || nx.getUTCDay() === 6) nx = new Date(nx.getTime() + 864e5); lastDone = nx.getUTCMonth() !== ld.getUTCMonth(); }
+    }
+    var at = new Int32Array(N).fill(-1), of = new Int32Array(N).fill(-1), last = -1;
+    for (var j = 0; j < n; j++) if (j < n - 1 || lastDone) at[end[j]] = j;
+    for (i = 0; i < N; i++) { if (at[i] >= 0) last = at[i]; of[i] = last; }
+    return { O: O, H: H, L: L, C: C, end: end, n: n, at: at, of: of };
+  }
+  /* Sygnały na świecach K. Dla każdego rodzaju tablica 0/1; extU/extD = skrajna cena układu (minimum dla wzrostowych, maksimum dla spadkowych). */
+  function tx4Signals(K, P) {
+    var n = K.n, O = K.O, H = K.H, L = K.L, C = K.C, rx = P.xReact / 100;
+    var S = { fwsU: new Uint8Array(n), fwdU: new Uint8Array(n), trU: new Uint8Array(n), fwsD: new Uint8Array(n), fwdD: new Uint8Array(n), trD: new Uint8Array(n) };
+    function reactUp(h, l, c) { if (!P.xUseReact) return true; var r = h - l; return r > 0 && (c - l) / r >= rx; }
+    function reactDn(h, l, c) { if (!P.xUseReact) return true; var r = h - l; return r > 0 && (h - c) / r >= rx; }
+    /* formacje świecowe na parach (otwarcie, zamknięcie): objęcie hossy lub przenikanie; objęcie bessy lub zasłona ciemnej chmury */
+    function bull(oa, ca, ob, cb) { return ca < oa && cb > ob && ((ob <= ca && cb >= oa) || (ob < ca && cb > (oa + ca) / 2 && cb < oa)); }
+    function bear(oa, ca, ob, cb) { return ca > oa && cb < ob && ((ob >= ca && cb <= oa) || (ob > ca && cb < (oa + ca) / 2 && cb > oa)); }
+    for (var j = 1; j < n; j++) {
+      var a = j - 2, b = j - 1;
+      /* fałszywe wybicie pojedyncze: świeca wychodzi poza skrajną cenę poprzedniej i zamyka się z powrotem */
+      if (L[j] < L[b] && C[j] > L[b] && reactUp(H[j], L[j], C[j])) S.fwsU[j] = 1;
+      if (H[j] > H[b] && C[j] < H[b] && reactDn(H[j], L[j], C[j])) S.fwsD[j] = 1;
+      if (a < 0) continue;
+      /* fałszywe wybicie podwójne: druga świeca zamyka się poza skrajną ceną pierwszej, trzecia wraca */
+      if (C[b] < O[b] && C[b] < L[a] && C[j] > L[a] && reactUp(Math.max(H[b], H[j]), Math.min(L[b], L[j]), C[j])) S.fwdU[j] = 1;
+      if (C[b] > O[b] && C[b] > H[a] && C[j] < H[a] && reactDn(Math.max(H[b], H[j]), Math.min(L[b], L[j]), C[j])) S.fwdD[j] = 1;
+      /* trójka: niższy szczyt i dołek, potem wyższy szczyt i dołek (lub odwrotnie) razem z formacją świecową, której trzecia świeca nie zaprzecza */
+      if (H[b] < H[a] && L[b] < L[a] && H[j] > H[b] && L[j] > L[b] &&
+        (bull(O[b], C[b], O[j], C[j]) || bull(O[a], C[a], O[b], C[j]) || (bull(O[a], C[a], O[b], C[b]) && C[j] >= O[j]))) S.trU[j] = 1;
+      if (H[b] > H[a] && L[b] > L[a] && H[j] < H[b] && L[j] < L[b] &&
+        (bear(O[b], C[b], O[j], C[j]) || bear(O[a], C[a], O[b], C[j]) || (bear(O[a], C[a], O[b], C[b]) && C[j] <= O[j]))) S.trD[j] = 1;
+    }
+    return S;
+  }
+  function sigUp(S, P, j) { return (P.xFws && S.fwsU[j]) || (P.xFwd && S.fwdU[j]) || (P.xTr && S.trU[j]) ? 1 : 0; }
+  function sigDn(S, P, j) { return (P.xFws && S.fwsD[j]) || (P.xFwd && S.fwdD[j]) || (P.xTr && S.trD[j]) ? 1 : 0; }
+  function extLow(K, j) { return Math.min(K.L[j], K.L[j - 1], j >= 2 ? K.L[j - 2] : Infinity); }
+  /* Strefy. Wsparcie: od minimum punktu zwrotnego do otwarcia pierwszej białej świecy. Opór: od otwarcia pierwszej czarnej świecy do maksimum.
+     Zamknięcie czarnej świecy pod strefą wsparcia zmienia jej funkcję na opór (i odwrotnie); drugie pokonanie usuwa strefę. */
+  function tx4Zones(K, S, P) {
+    var n = K.n, O = K.O, H = K.H, L = K.L, C = K.C, k = Math.max(1, Math.round(P.xPivot)), mem = P.xZoneMem, tol = P.xSupTol / 100, zones = [];
+    var supOK = new Uint8Array(n), room = new Float64Array(n).fill(Infinity), sup = new Float64Array(n).fill(NaN), res = new Float64Array(n).fill(NaN);
+    for (var j = 0; j < n; j++) {
+      var p = j - k, q, w, z;
+      if (p >= k) {
+        var isLow = true, isHigh = true;
+        for (q = 1; q <= k; q++) { if (!(L[p] < L[p - q]) || !(L[p] <= L[p + q])) isLow = false; if (!(H[p] > H[p - q]) || !(H[p] >= H[p + q])) isHigh = false; }
+        if (isLow) for (w = p; w <= j; w++) if (C[w] > O[w]) { if (O[w] > L[p]) zones.push({ kind: "S", lo: L[p], hi: O[w], src: p, born: j, flip: false }); break; }
+        if (isHigh) for (w = p; w <= j; w++) if (C[w] < O[w]) { if (O[w] < H[p]) zones.push({ kind: "R", lo: O[w], hi: H[p], src: p, born: j, flip: false }); break; }
+      }
+      var keep = [];
+      for (q = 0; q < zones.length; q++) {
+        z = zones[q];
+        if (j - z.src > mem) continue;
+        if (z.born < j) {
+          if (z.kind === "S" && C[j] < O[j] && C[j] < z.lo) { if (z.flip) continue; z.kind = "R"; z.flip = true; }
+          else if (z.kind === "R" && C[j] > O[j] && C[j] > z.hi) { if (z.flip) continue; z.kind = "S"; z.flip = true; }
+        }
+        keep.push(z);
+      }
+      zones = keep;
+      var ext = j >= 1 ? extLow(K, j) : L[j], nearRes = Infinity, nearSup = -Infinity;
+      for (q = 0; q < zones.length; q++) {
+        z = zones[q];
+        if (z.kind === "S") { if (z.src <= j - 3 && ext <= z.hi * (1 + tol) && C[j] >= z.lo) supOK[j] = 1; if (z.hi <= C[j] && z.hi > nearSup) nearSup = z.hi; }
+        else if (z.lo > C[j] && z.lo < nearRes) nearRes = z.lo;
+      }
+      if (isFinite(nearRes)) { room[j] = (nearRes / C[j] - 1) * 100; res[j] = nearRes; }
+      if (isFinite(nearSup)) sup[j] = nearSup;
+    }
+    return { supOK: supOK, room: room, sup: sup, res: res, now: zones };
+  }
+  /* Wszystko, czego potrzebuje test dla jednej spółki, przeliczone na sesje dzienne. */
+  function tx4Prep(M, T, P) {
+    var N = M.dates.length, fz = P.xFrames === "WM" ? "W" : "D", fc = P.xFrames === "WM" ? "M" : "W";
+    var K = candles(M, T, fz), KC = candles(M, T, fc), S = tx4Signals(K, P), SC = tx4Signals(KC, P), Z = tx4Zones(K, S, P);
+    var ch = new Int8Array(KC.n), cur = 0, j, i;
+    for (j = 0; j < KC.n; j++) { var u = SC.fwsU[j] || SC.fwdU[j] || SC.trU[j], d = SC.fwsD[j] || SC.fwdD[j] || SC.trD[j]; if (u && !d) cur = 1; else if (d && !u) cur = -1; ch[j] = cur; }
+    var entry = new Uint8Array(N), exitSig = new Uint8Array(N), charDn = new Uint8Array(N), ext = new Float64Array(N).fill(NaN);
+    for (i = T.start; i < N; i++) {
+      j = K.at[i]; if (j < 1) continue;
+      var c = KC.of[i] >= 0 ? ch[KC.of[i]] : 0;
+      if (c < 0) charDn[i] = 1;
+      if (sigDn(S, P, j)) exitSig[i] = 1;
+      if (sigUp(S, P, j)) {
+        ext[i] = extLow(K, j);
+        if ((!P.xUseChar || c > 0) && (!P.xUseSup || Z.supOK[j]) && (!P.xUseRoom || Z.room[j] >= P.xRoom)) entry[i] = 1;
+      }
+    }
+    return { K: K, KC: KC, S: S, Z: Z, ch: ch, entry: entry, exitSig: exitSig, charDn: charDn, ext: ext };
+  }
+  function tx4Exit(X, P, T, i, peak, def) {
+    var c = T.c[i];
+    if (P.xUseTrail && c <= peak * (1 - P.xTrail / 100)) return "stop";
+    if (P.xUseDef && isFinite(def) && c < def) return "obrona";
+    if (P.xExitSig && X.exitSig[i]) return "sig";
+    if (P.xExitChar && X.charDn[i]) return "char";
+    return null;
+  }
+  function tx4Stop(P, peak, def) {
+    var s = Math.max(P.xUseTrail ? peak * (1 - P.xTrail / 100) : -Infinity, P.xUseDef && isFinite(def) ? def : -Infinity);
+    return isFinite(s) ? s : NaN;
+  }
+  /* Poziom obrony dla pozycji kupionej w sesji e0: minimum ostatniego sygnału wzrostowego z 10 świec przed zakupem, a gdy go nie było, minimum 3 ostatnich świec. */
+  function tx4Def(X, P, e0) {
+    var K = X.K, j0 = e0 > 0 ? K.of[e0 - 1] : -1, j;
+    if (j0 < 0) return NaN;
+    for (j = j0; j >= Math.max(1, j0 - 9); j--) if (sigUp(X.S, P, j)) return extLow(K, j);
+    return Math.min(K.L[j0], j0 >= 1 ? K.L[j0 - 1] : Infinity, j0 >= 2 ? K.L[j0 - 2] : Infinity);
+  }
+  /* Warunki kupna Tx4 na ostatniej zakończonej świecy – dla Skanera. */
+  function tx4Checks(X, P, i) {
+    var K = X.K, j = K.of[i], out = [];
+    if (j < 1) return out;
+    var c = X.KC.of[i] >= 0 ? X.ch[X.KC.of[i]] : 0;
+    out.push(["xsig", !!sigUp(X.S, P, j), NaN]);
+    if (P.xUseChar) out.push(["xchar", c > 0, c]);
+    if (P.xUseSup) out.push(["xsup", !!X.Z.supOK[j], X.Z.sup[j]]);
+    if (P.xUseRoom) out.push(["xroom", X.Z.room[j] >= P.xRoom, X.Z.room[j]]);
+    return out;
+  }
+  var TX_TYPES = [["fwsU", "fws", 1], ["fwdU", "fwd", 1], ["trU", "tr", 1], ["fwsD", "fws", -1], ["fwdD", "fwd", -1], ["trD", "tr", -1]];
+  /* Badanie sygnałów: jak często po sygnale kurs zamknął się po właściwej stronie po 5, 10 i 20 świecach. */
+  function tx4Study(M, R) {
+    var P = R.P, hs = [5, 10, 20], rows = TX_TYPES.map(function (t) { return { key: t[0], type: t[1], dir: t[2], n: 0, hit: [0, 0, 0], cnt: [0, 0, 0], sum: 0 }; });
+    rows.push({ key: "entry", type: "entry", dir: 1, n: 0, hit: [0, 0, 0], cnt: [0, 0, 0], sum: 0 });   // sygnał wzrostowy razem ze wszystkimi włączonymi warunkami kupna
+    var base = { n: 0, up: [0, 0, 0], cnt: [0, 0, 0], sum: 0 };
+    M.tickers.forEach(function (T, t) {
+      var X = R.tx && R.tx[t]; if (!X || !R.inU[t]) return;
+      var K = X.K, C = K.C;
+      for (var j = 2; j < K.n; j++) {
+        if (K.end[j] < R.start) continue;
+        var done = j < K.n - 1 || K.at[K.end[j]] === j; if (!done) continue;
+        for (var h = 0; h < 3; h++) if (j + hs[h] < K.n) { base.cnt[h]++; if (C[j + hs[h]] > C[j]) base.up[h]++; if (h === 1) base.sum += C[j + 10] / C[j] - 1; }
+        base.n++;
+        rows.forEach(function (r) {
+          if (r.key === "entry" ? !X.entry[K.end[j]] : !X.S[r.key][j]) return;
+          r.n++;
+          for (var h2 = 0; h2 < 3; h2++) if (j + hs[h2] < K.n) { r.cnt[h2]++; if (r.dir > 0 ? C[j + hs[h2]] > C[j] : C[j + hs[h2]] < C[j]) r.hit[h2]++; if (h2 === 1) r.sum += C[j + 10] / C[j] - 1; }
+        });
+      }
+    });
+    return { rows: rows, base: base, horizons: hs };
+  }
+  /* Sygnały z trzech ostatnich zakończonych świec każdego waloru. */
+  function tx4Now(M, R) {
+    var P = R.P, N = M.dates.length, out = [];
+    M.tickers.forEach(function (T, t) {
+      var X = R.tx && R.tx[t]; if (!X) return;
+      var K = X.K, j1 = K.of[N - 1];
+      for (var j = j1; j >= Math.max(1, j1 - 2); j--) TX_TYPES.forEach(function (ty) {
+        if (!X.S[ty[0]][j]) return;
+        var c = X.KC.of[K.end[j]] >= 0 ? X.ch[X.KC.of[K.end[j]]] : 0;
+        out.push({ t: t, s: T.s, n: T.n, type: ty[1], dir: ty[2], i: K.end[j], age: j1 - j, close: K.C[j], sup: !!X.Z.supOK[j], ch: c, on: !!P[ty[1] === "fws" ? "xFws" : ty[1] === "fwd" ? "xFwd" : "xTr"], level: ty[2] > 0 ? extLow(K, j) : Math.max(K.H[j], K.H[j - 1], j >= 2 ? K.H[j - 2] : -Infinity) });
+      });
+    });
+    return out.sort(function (a, b) { return a.age - b.age || b.dir - a.dir || (a.s < b.s ? -1 : 1); });
+  }
+
   function run(M, Pin) {
     var P = {}; for (var k in DEFAULTS) P[k] = (Pin && Pin[k] !== undefined) ? Pin[k] : DEFAULTS[k];
     var N = M.dates.length, TT = M.tickers, nT = TT.length;
     var I = TT.map(function (T) { return indicators(M, T, P); });
-    var ev = evalDays(M, P);
+    var tx4 = P.mode === "tx4", X = tx4 ? TT.map(function (T) { return tx4Prep(M, T, P); }) : null;
+    var ev = evalDays(M, tx4 ? { weekly: P.xFrames === "WM" } : P);
+    var inU = TT.map(function (T) { return tx4 && P.xAll ? true : !T.x; });   // walory biorące udział w teście
+    function entF(t, i) { return tx4 ? i >= TT[t].start && X[t].entry[i] === 1 : entryOk(TT[t], I[t], P, i); }
+    function exF(t, i, peak, def) { return tx4 ? tx4Exit(X[t], P, TT[t], i, peak, def) : exitReason(TT[t], I[t], P, i, peak); }
     var s0 = firstIndexOfYear(M, P.startYear);
-    var cool = Math.round(P.cooldownWeeks * 5), costF = P.cost / 100;
+    var cool = Math.round((tx4 ? P.xCool : P.cooldownWeeks) * 5), costF = P.cost / 100;
 
     /* 1. Sygnały każdej spółki osobno (bez limitu kapitału) – dla skanera i wykresu. */
     var signals = TT.map(function (T, t) {
-      var st = { inPos: false, peak: 0, entrySig: -1, lastExit: -1e9, events: [] };
+      var st = { inPos: false, peak: 0, def: NaN, entrySig: -1, lastExit: -1e9, events: [] };
       for (var i = Math.max(s0, T.start); i < N; i++) {
         if (st.inPos && T.c[i] > st.peak) st.peak = T.c[i];
         if (!ev[i]) continue;
         if (st.inPos) {
-          var why = exitReason(T, I[t], P, i, st.peak);
+          var why = exF(t, i, st.peak, st.def);
           if (why) { st.inPos = false; st.lastExit = i; st.events.push({ i: i, type: "sell", why: why }); }
-        } else if (i - st.lastExit >= cool && entryOk(T, I[t], P, i)) {
-          st.inPos = true; st.peak = T.c[i]; st.entrySig = i; st.events.push({ i: i, type: "buy" });
+        } else if (i - st.lastExit >= cool && entF(t, i)) {
+          st.inPos = true; st.peak = T.c[i]; st.entrySig = i; st.def = tx4 ? X[t].ext[i] : NaN; st.events.push({ i: i, type: "buy" });
         }
       }
       return st;
@@ -153,9 +345,11 @@
     /* 2. Portfel z limitem pozycji i kosztami. */
     var eq = new Float64Array(N), expo = new Float64Array(N), bench = new Float64Array(N);
     var cash = P.capital, held = {}, heldCount = 0, trades = [], lastExit = new Float64Array(nT).fill(-1e9);
-    var pendSell = [], pendBuy = [], t, i;
+    var pendSell = [], pendBuy = [], pendSig = -1, t, i;
     var weight = 1 / P.maxPos;
-    if (P.useRisk && P.useTrail) weight = Math.min(weight, (P.riskPct / 100) / (P.trail / 100));
+    if (!tx4 && P.useRisk && P.useTrail) weight = Math.min(weight, (P.riskPct / 100) / (P.trail / 100));
+    /* Tx4: ryzyko liczone od odległości kursu do poziomu obrony z sygnału wejścia */
+    function wFor(t, sig, px) { if (!tx4 || !P.useRisk || !P.xUseDef) return weight; var d = X[t].ext[sig], dist = isFinite(d) && px > 0 ? 1 - d / px : NaN; return dist > 0 ? Math.min(weight, (P.riskPct / 100) / Math.max(dist, 0.005)) : weight; }
     for (i = 0; i < s0; i++) { eq[i] = P.capital; bench[i] = P.capital; }
     for (i = s0; i < N; i++) {
       /* zlecenia z poprzedniego dnia oceny – po cenie otwarcia */
@@ -170,13 +364,13 @@
         var eqOpen = cash; for (t in held) eqOpen += held[t].sh * TT[t].o[i];
         for (a = 0; a < pendBuy.length; a++) {
           t = pendBuy[a]; if (held[t] || heldCount >= P.maxPos) continue;
-          var spend = Math.min(eqOpen * weight, cash);
-          if (spend < 1) continue;
           px = TT[t].o[i];
+          var spend = Math.min(eqOpen * wFor(t, pendSig, px), cash);
+          if (spend < 1) continue;
           var sh = spend / (px * (1 + costF));
           cash -= spend;
           var tr = { t: t, s: TT[t].s, entryIdx: i, entryPx: px, costBasis: spend, open: true, exitIdx: N - 1, exitPx: null, pnl: 0, ret: 0, why: null };
-          trades.push(tr); held[t] = { sh: sh, peak: px, tr: tr }; heldCount++;
+          trades.push(tr); held[t] = { sh: sh, peak: px, tr: tr, def: tx4 ? X[t].ext[pendSig] : NaN }; heldCount++;
         }
         pendSell = []; pendBuy = [];
       }
@@ -188,27 +382,27 @@
       if (i === s0) bench[i] = P.capital;
       else {
         var rs = 0, rn = 0;
-        for (t = 0; t < nT; t++) if (!TT[t].x && TT[t].start <= i - 1) { rs += TT[t].c[i] / TT[t].c[i - 1] - 1; rn++; }
+        for (t = 0; t < nT; t++) if (inU[t] && TT[t].start <= i - 1) { rs += TT[t].c[i] / TT[t].c[i - 1] - 1; rn++; }
         bench[i] = bench[i - 1] * (1 + (rn ? rs / rn : 0));
       }
       /* decyzje na zamknięciu dnia oceny */
       if (ev[i] && i + 1 < N) {
         for (t in held) {
-          var why = exitReason(TT[t], I[t], P, i, held[t].peak);
+          var why = exF(+t, i, held[t].peak, held[t].def);
           if (why) pendSell.push({ t: +t, why: why, sig: i });
         }
         var free = P.maxPos - heldCount + pendSell.length;
         if (free > 0) {
           var cand = [];
           for (t = 0; t < nT; t++) {
-            if (TT[t].x || held[t] || i - lastExit[t] < cool) continue;   // spółki z samymi kursami nie biorą udziału w teście
-            if (entryOk(TT[t], I[t], P, i)) cand.push(t);
+            if (!inU[t] || held[t] || i - lastExit[t] < cool) continue;   // w regułach klasycznych spółki z samymi kursami nie biorą udziału w teście
+            if (entF(t, i)) cand.push(t);
           }
           cand.sort(function (x, y) {
             var mx = isNaN(I[x].mom[i]) ? -1e9 : I[x].mom[i], my = isNaN(I[y].mom[i]) ? -1e9 : I[y].mom[i];
             return my - mx || x - y;
           });
-          pendBuy = cand.slice(0, free);
+          pendBuy = cand.slice(0, free); pendSig = i;
         }
       }
     }
@@ -220,7 +414,7 @@
     var e = N - 1, sp = Math.min(Math.max(firstIndexOfYear(M, P.splitYear), s0 + 1), e - 1);
     return {
       P: P, start: s0, end: e, split: sp, weight: weight,
-      equity: eq, bench: bench, exposure: expo, trades: trades, signals: signals, ind: I, evalDays: ev,
+      equity: eq, bench: bench, exposure: expo, trades: trades, signals: signals, ind: I, evalDays: ev, tx: X, inU: inU,
       stats: {
         all: periodStats(M, eq, s0, e, trades, expo), allB: periodStats(M, bench, s0, e),
         ins: periodStats(M, eq, s0, sp, trades, expo), insB: periodStats(M, bench, s0, sp),
@@ -238,7 +432,8 @@
       var status = S.inPos ? "hold" : "out";
       if (last && i - last.i <= fresh) status = last.type === "buy" ? "buy" : "sell";
       var stop = NaN;
-      if (S.inPos) {
+      if (S.inPos && R.tx) stop = tx4Stop(P, S.peak, S.def);
+      else if (S.inPos) {
         var a = P.useTrail ? S.peak * (1 - P.trail / 100) : -Infinity;
         var b = P.useTrendExit ? I.smaL[i] * (1 - P.exitBuffer / 100) : -Infinity;
         stop = Math.max(a, b); if (!isFinite(stop)) stop = NaN;
@@ -249,15 +444,15 @@
         sinceEntry: S.inPos && S.entrySig + 1 < N ? c / T.o[S.entrySig + 1] - 1 : NaN,
         stop: stop, toStop: isNaN(stop) ? NaN : stop / c - 1,
         vsSma: (c / I.smaL[i] - 1) * 100, mom: I.mom[i], pe: I.pe[i], eps: I.eps[i], growth: I.growth[i],
-        checks: entryChecks(T, I, P, i)
+        checks: R.tx ? tx4Checks(R.tx[t], P, i) : entryChecks(T, I, P, i)
       };
-    }).filter(function (r) { return !M.tickers[r.t].x; });
+    }).filter(function (r) { return R.inU[r.t]; });
   }
 
   /* ---------- Portfel: polecenia dla prawdziwych pozycji ---------- */
   function dateInt(s) { return +String(s).replace(/-/g, ""); }
   function dstr(n) { var s = String(n); return s.slice(6) + "." + s.slice(4, 6) + "." + s.slice(0, 4); }
-  var WHY = { stop: "spadek od szczytu", trend: "kurs pod średnią", zysk: "spadek zysku spółki" };
+  var WHY = { stop: "spadek od szczytu", trend: "kurs pod średnią", zysk: "spadek zysku spółki", obrona: "zamknięcie pod poziomem obrony", sig: "sygnał spadkowy Tx4", char: "spadkowy charakter na wyższych ramach" };
 
   /* st = { positions: [{s, date: "RRRR-MM-DD", px, qty}], cash, fx }. Ceny pozycji są w walucie notowań spółki (pole cur spółki: brak = USD, "PLN" = złote).
      Wartości i sumy wychodzą w dolarach: pozycje w złotych dzielone są przez fx (kurs dolara w złotych), cash jest w dolarach.
@@ -282,23 +477,25 @@
       var T = TT[t], I = R.ind[t], d = dateInt(p.date), e0 = N - 1, k;
       for (k = 0; k < N; k++) if (M.dates[k] >= d) { e0 = k; break; }
       if (e0 < T.start) e0 = T.start;
-      var peak = p.px, sig = null;
+      var peak = p.px, sig = null, X = R.tx ? R.tx[t] : null, def = X ? tx4Def(X, P, e0) : NaN;
       for (k = e0; k < N; k++) {
         if (T.c[k] > peak) peak = T.c[k];
-        if (ev[k] && !sig) { var why = exitReason(T, I, P, k, peak); if (why) sig = { i: k, why: why }; }
+        if (ev[k] && !sig) { var why = X ? tx4Exit(X, P, T, k, peak, def) : exitReason(T, I, P, k, peak); if (why) sig = { i: k, why: why }; }
       }
       var toUsd = T.cur === "PLN" ? 1 / fx : 1, c = lp || T.c[N - 1], val = p.qty * c * toUsd, paid = p.qty * p.px * toUsd;
       if (c > peak) peak = c;
       var a = P.useTrail ? peak * (1 - P.trail / 100) : -Infinity;
       var b = P.useTrendExit && isFinite(I.smaL[N - 1]) ? I.smaL[N - 1] * (1 - P.exitBuffer / 100) : -Infinity;
       var stop = Math.max(a, b); if (!isFinite(stop)) stop = NaN;
+      if (X) stop = tx4Stop(P, peak, def);
       value += val; cost += paid;
       if (sig) sellValue += val; else keep++;
       items.push({ type: sig ? "sell" : (c <= stop ? "watch" : "hold"), s: p.s, n: T.n, t: t, p: p, cur: T.cur === "PLN" ? "PLN" : "USD", close: c, value: val, ret: c / p.px - 1, pnl: val - paid,
         stop: stop, toStop: isNaN(stop) ? NaN : stop / c - 1, sig: sig, fresh: !!sig && sig.i >= lastEval });
     });
     var total = value + cash, free = Math.max(0, P.maxPos - keep), cand = [];
-    if (lastEval >= 0) TT.forEach(function (T, t) { if (!T.x && !heldSyms[T.s] && entryOk(T, R.ind[t], P, lastEval)) cand.push(t); });
+    function entA(t, i) { return R.tx ? i >= TT[t].start && R.tx[t].entry[i] === 1 : entryOk(TT[t], R.ind[t], P, i); }
+    if (lastEval >= 0) TT.forEach(function (T, t) { if (R.inU[t] && !heldSyms[T.s] && entA(t, lastEval)) cand.push(t); });
     cand.sort(function (x, y) {
       var mx = isNaN(R.ind[x].mom[lastEval]) ? -1e9 : R.ind[x].mom[lastEval], my = isNaN(R.ind[y].mom[lastEval]) ? -1e9 : R.ind[y].mom[lastEval];
       return my - mx || x - y;
@@ -308,7 +505,7 @@
       var T = TT[t], c = live && live[T.s] > 0 ? live[T.s] : T.c[N - 1], amount = total > 0 ? Math.max(0, Math.min(total * R.weight, left)) : NaN;
       if (total > 0) left -= amount;
       return { type: "buy", s: T.s, n: T.n, t: t, close: c, amount: amount, shares: amount / c, mom: R.ind[t].mom[lastEval],
-        fresh: prevEval < 0 || !entryOk(T, R.ind[t], P, prevEval) };
+        fresh: prevEval < 0 || !entA(t, prevEval) };
     });
     var order = { sell: 0, watch: 1, buy: 2, hold: 3, nodata: 4 };
     items = items.concat(buys).sort(function (x, y) { return order[x.type] - order[y.type]; });
@@ -329,6 +526,7 @@
     return { noteworthy: fresh || sells.length > 0, text: "Analizator giełdy, notowania z " + dstr(M.dates[N - 1]) + ". " + out.join(" ") };
   }
 
-  var api = { DEFAULTS: DEFAULTS, run: run, scan: scan, actions: actions, summary: summary, WHY: WHY, ymd: ymd, firstIndexOfYear: firstIndexOfYear };
+  var api = { DEFAULTS: DEFAULTS, run: run, scan: scan, actions: actions, summary: summary, WHY: WHY, ymd: ymd, firstIndexOfYear: firstIndexOfYear,
+    tx4Study: tx4Study, tx4Now: tx4Now, _tx4: { candles: candles, signals: tx4Signals, zones: tx4Zones } };
   if (typeof module !== "undefined" && module.exports) module.exports = api; else root.Engine = api;
 })(typeof window !== "undefined" ? window : globalThis);

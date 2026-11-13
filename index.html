@@ -188,6 +188,9 @@ input[type=number] { width: 100%; background: var(--bg); border: 1px solid var(-
 .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
 .seg button { border: 0; background: none; padding: 4px 10px; font-size: 12.5px; cursor: pointer; color: var(--muted); }
 .seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+#tx-mode button { padding: 7px 14px; font-size: 14px; font-weight: 600; }
+.params [hidden] { display: none !important; }
+#tx-now .off { opacity: .5; }
 
 /* metoda */
 .prose { display: grid; gap: 16px; max-width: 760px; }
@@ -261,6 +264,7 @@ body.solo .top nav, body.solo #who, body.solo #tour-start, body.solo .welcome, b
     <button class="chip tourbtn2" id="hints-toggle" type="button" data-tip="hints" aria-pressed="true">Podpowiedzi: włączone</button>
     <nav aria-label="Widoki">
       <a href="#strategia" id="nav-strategia" data-tip="nav-strategia">Strategia</a>
+      <a href="#tx4" id="nav-tx4" data-tip="nav-tx4">Tx4</a>
       <a href="#skaner" id="nav-skaner" data-tip="nav-skaner">Skaner</a>
       <a href="#portfel" id="nav-portfel" data-tip="nav-portfel">Portfel</a>
       <a href="#metoda" id="nav-metoda" data-tip="nav-metoda">Metoda</a>
@@ -317,6 +321,25 @@ body.solo .top nav, body.solo #who, body.solo #tour-start, body.solo .welcome, b
         </div>
         <p class="note" style="margin:0" id="scan-note"></p>
         <div class="scanlist" id="scanlist"></div>
+      </div>
+    </section>
+
+    <section class="view" id="view-tx4" hidden>
+      <div class="card" id="tx-head">
+        <h2>Reguły Tx4 · szkic do poprawiania</h2>
+        <p style="margin:0 0 12px;max-width:92ch">Ta zakładka składa strategię z klocków techniki Tx4: sygnałów z dwóch lub trzech świec, stref wsparcia i oporu oraz dwóch ram czasowych. Klocki są zapisane według lekcji. Sposób ich połączenia w decyzje kupna i sprzedaży jest roboczy, bo tej części w lekcjach nie było. Każdy warunek możesz włączyć, wyłączyć albo przestawić, a test przelicza się od razu.</p>
+        <div class="people" style="align-items:center"><span>Analizator liczy według reguł:</span>
+          <div class="seg" id="tx-mode" role="group" aria-label="Zestaw reguł w analizatorze"><button type="button" data-mode="classic" data-tip="mode-classic">Trend i zysk</button><button type="button" data-mode="tx4" data-tip="mode-tx4">Tx4 (szkic)</button></div>
+        </div>
+        <p class="note" id="tx-mode-note" style="margin-top:8px"></p>
+      </div>
+      <div class="grid" style="margin-top:16px">
+        <aside class="card params" id="tx-params" aria-label="Reguły Tx4"></aside>
+        <div class="summary">
+          <div class="card"><h2 data-tip="h-tx-test">Wynik testu reguł Tx4</h2><div id="tx-alert"></div><div class="tiles" id="tx-tiles"></div><p class="note" id="tx-note"></p></div>
+          <div class="card"><h2 data-tip="h-tx-study">Badanie sygnałów</h2><div class="scroll"><table id="tx-study"></table></div><p class="note" id="tx-study-note"></p></div>
+          <div class="card"><h2 data-tip="h-tx-now">Sygnały z ostatnich świec</h2><div class="scroll"><table id="tx-now"></table></div><p class="note" id="tx-now-note"></p></div>
+        </div>
       </div>
     </section>
 
@@ -437,17 +460,17 @@ var PRESETS = {
   "Agresywny": { maxPos: 3, trail: 35, momMin: 10, useGrowth: false, usePosEps: false, exitBuffer: 5, cooldownWeeks: 2 }
 };
 var SCHEMA = [
-  { t: "Kiedy kupić: wykres", items: [
+  { c: 1, t: "Kiedy kupić: wykres", items: [
     { k: "useTrend", l: "Kurs powyżej średniej długoterminowej", s: [{ k: "smaLong", l: "Długość średniej", min: 50, max: 300, step: 10, u: " sesji" }] },
     { k: "useCross", l: "Średnia szybka powyżej długoterminowej", s: [{ k: "smaFast", l: "Długość średniej szybkiej", min: 20, max: 100, step: 5, u: " sesji" }] },
     { k: "useMom", l: "Kurs wzrósł w ostatnich miesiącach", s: [{ k: "momMonths", l: "Okres", min: 3, max: 12, step: 1, u: " mies." }, { k: "momMin", l: "Minimalny wzrost", min: -10, max: 40, step: 5, u: "%" }] }
   ] },
-  { t: "Kiedy kupić: wyniki spółki", items: [
+  { c: 1, t: "Kiedy kupić: wyniki spółki", items: [
     { k: "usePosEps", l: "Spółka ma zysk (zysk na akcję z 12 miesięcy powyżej zera)" },
     { k: "useGrowth", l: "Zysk na akcję rośnie rok do roku", s: [{ k: "growthMin", l: "Minimalny wzrost", min: -20, max: 60, step: 5, u: "%" }] },
     { k: "usePe", l: "Cena do zysku (P/E) nie wyższa niż", s: [{ k: "peMax", l: "Maksymalne P/E", min: 10, max: 100, step: 5, u: "" }] }
   ] },
-  { t: "Kiedy sprzedać", items: [
+  { c: 1, t: "Kiedy sprzedać", items: [
     { k: "useTrendExit", l: "Kurs spada pod średnią długoterminową", s: [{ k: "exitBuffer", l: "Margines pod średnią", min: 0, max: 10, step: 1, u: "%" }] },
     { k: "useTrail", l: "Kurs spada od szczytu po zakupie", s: [{ k: "trail", l: "Wielkość spadku", min: 10, max: 50, step: 5, u: "%" }] },
     { k: "useFundExit", l: "Zysk na akcję spada rok do roku", s: [{ k: "growthExit", l: "Próg spadku", min: -50, max: 0, step: 5, u: "%" }] },
@@ -466,15 +489,72 @@ var SCHEMA = [
     { s: [{ k: "splitYear", l: "Sprawdzian od roku", min: 2010, max: 2024, step: 1, u: "" }] }
   ] }
 ];
+var TX_SCHEMA = [
+  { t: "Ramy czasowe", items: [
+    { sel: "xFrames", l: "Ramy zarządzania i charakteru", o: [["WM", "Tydzień i miesiąc"], ["DW", "Dzień i tydzień"]] }
+  ] },
+  { t: "Sygnały", items: [
+    { k: "xFws", l: "Fałszywe wybicie pojedyncze" },
+    { k: "xFwd", l: "Fałszywe wybicie podwójne" },
+    { k: "xTr", l: "Trójka" },
+    { k: "xUseReact", l: "Wymagaj świecy reakcji", s: [{ k: "xReact", l: "Zamknięcie co najmniej na tej wysokości świecy", min: 30, max: 90, step: 5, u: "%" }] }
+  ] },
+  { t: "Kiedy kupić", items: [
+    { k: "xUseChar", l: "Ostatni sygnał na ramach charakteru był wzrostowy" },
+    { k: "xUseSup", l: "Sygnał przy strefie wsparcia", s: [{ k: "xSupTol", l: "Tolerancja", min: 0, max: 5, step: 0.5, u: "%" }] },
+    { k: "xUseRoom", l: "Miejsce do najbliższego oporu", s: [{ k: "xRoom", l: "Minimalne miejsce", min: 1, max: 20, step: 1, u: "%" }] }
+  ] },
+  { t: "Strefy wsparcia i oporu", items: [
+    { s: [{ k: "xPivot", l: "Świec z każdej strony punktu zmiany", min: 1, max: 5, step: 1, u: "" }] },
+    { s: [{ k: "xZoneMem", l: "Pamięć stref", min: 30, max: 400, step: 10, u: " świec" }] }
+  ] },
+  { t: "Kiedy sprzedać", items: [
+    { k: "xExitSig", l: "Sygnał spadkowy na ramach zarządzania" },
+    { k: "xUseDef", l: "Zamknięcie pod poziomem obrony (minimum sygnału kupna)" },
+    { k: "xExitChar", l: "Spadkowy charakter na ramach wyższych" },
+    { k: "xUseTrail", l: "Kurs spada od szczytu po zakupie", s: [{ k: "xTrail", l: "Wielkość spadku", min: 10, max: 50, step: 5, u: "%" }] },
+    { s: [{ k: "xCool", l: "Przerwa przed ponownym zakupem tego samego waloru", min: 0, max: 26, step: 1, u: " tyg." }] }
+  ] },
+  { t: "Zakres", items: [
+    { k: "xAll", l: "Testuj także GPW, ETF-y i złoto" }
+  ] }
+];
+function evalWeekly() { return P.mode === "tx4" ? P.xFrames === "WM" : P.weekly; }
+function keepX() { var o = { mode: P.mode }; for (var k in P) if (k.charAt(0) === "x") o[k] = P[k]; return o; }   // ustawienia Tx4 nie giną przy zmianie zestawu klasycznego
 function fmtParam(s, v) { var d = s.step < 1 ? (s.step < 0.1 ? 2 : 1) : 0; return nf(v, d).replace("-", "−") + s.u; }
 function buildParams() {
   var h = '<h2>Parametry <button class="linkbtn" style="padding:0;font-size:12.5px;text-transform:none;letter-spacing:0" id="reset" type="button" data-tip="reset">Przywróć domyślne</button></h2><div class="presets" id="presets">';
   Object.keys(PRESETS).forEach(function (n) { h += '<button class="chip" type="button" data-preset="' + n + '" data-tip="preset:' + n + '" aria-pressed="false">' + n + "</button>"; });
-  h += '</div><div id="alert"></div>';
-  SCHEMA.forEach(function (g) {
-    h += "<fieldset><legend>" + g.t + "</legend>";
+  h += '</div><div class="alert" id="mode-note" hidden>Analizator liczy teraz według reguł Tx4. Warunki kupna i sprzedaży ustawiasz w zakładce <a href="#tx4">Tx4</a>, a tutaj zostają kapitał, koszty i zakres testu.</div><div id="alert"></div>';
+  h += groupsHtml(SCHEMA);
+  $("params").innerHTML = h;
+  $("tx-params").innerHTML = '<h2>Edytor reguł <button class="linkbtn" style="padding:0;font-size:12.5px;text-transform:none;letter-spacing:0" id="tx-reset" type="button" data-tip="tx-reset">Przywróć domyślne</button></h2>' + groupsHtml(TX_SCHEMA);
+  [$("params"), $("tx-params")].forEach(function (el) { el.addEventListener("input", onParamInput); });
+  $("tx-params").addEventListener("click", function (e) { if (e.target.id !== "tx-reset") return; for (var k in E.DEFAULTS) if (k.charAt(0) === "x") P[k] = E.DEFAULTS[k]; syncParams(); schedule(); });
+  $("tx-mode").addEventListener("click", function (e) { var b = e.target.closest("[data-mode]"); if (!b || P.mode === b.dataset.mode) return; P.mode = b.dataset.mode; syncParams(); compute(); });
+  $("params").addEventListener("click", function (e) {
+    var b = e.target.closest("[data-preset]");
+    if (b) { P = Object.assign({}, E.DEFAULTS, { capital: P.capital, cost: P.cost, startYear: P.startYear, splitYear: P.splitYear }, PRESETS[b.dataset.preset], keepX()); syncParams(); schedule(); }
+    if (e.target.id === "reset") { P = Object.assign({}, E.DEFAULTS, keepX()); syncParams(); schedule(); }
+  });
+}
+function onParamInput(e) {
+  var t = e.target;
+  if (t.dataset.tog) P[t.dataset.tog] = t.checked;
+  else if (t.dataset.rng) P[t.dataset.rng] = +t.value;
+  else if (t.dataset.sel) P[t.dataset.sel] = t.value;
+  else if (t.dataset.num) { var v = +t.value; if (!(v >= 1000)) return; P[t.dataset.num] = Math.min(v, 1e7); }
+  else return;
+  if (P.splitYear <= P.startYear) { if (t.dataset.rng === "startYear") P.splitYear = Math.min(2024, P.startYear + 2); else P.startYear = Math.max(2006, P.splitYear - 2); }
+  syncParams(); schedule();
+}
+function groupsHtml(schema) {
+  var h = "";
+  schema.forEach(function (g) {
+    h += "<fieldset" + (g.c ? " data-classic" : "") + "><legend>" + g.t + "</legend>";
     g.items.forEach(function (it) {
       if (it.d) { h += '<div class="derived" id="derived" data-tip="derived"></div>'; return; }
+      if (it.sel) { h += '<div class="sub flat" data-tip="' + it.sel + '"><label for="p-' + it.sel + '">' + it.l + '</label><select id="p-' + it.sel + '" data-sel="' + it.sel + '" style="grid-column:1/-1">' + it.o.map(function (o) { return '<option value="' + o[0] + '">' + o[1] + "</option>"; }).join("") + "</select></div>"; return; }
       if (it.n) { h += '<div class="sub flat" data-tip="' + it.n + '"><label for="p-' + it.n + '">' + it.l + '</label><input type="number" id="p-' + it.n + '" data-num="' + it.n + '" min="1000" max="10000000" step="1000" inputmode="numeric" style="grid-column:1/-1"></div>'; return; }
       h += '<div class="rule" data-rule="' + (it.k || "") + '">';
       if (it.k) h += '<label class="tog" data-tip="' + it.k + '"><input type="checkbox" id="p-' + it.k + '" data-tog="' + it.k + '"><span>' + it.l + "</span></label>";
@@ -485,30 +565,22 @@ function buildParams() {
     });
     h += "</fieldset>";
   });
-  $("params").innerHTML = h;
-  $("params").addEventListener("input", function (e) {
-    var t = e.target;
-    if (t.dataset.tog) P[t.dataset.tog] = t.checked;
-    else if (t.dataset.rng) P[t.dataset.rng] = +t.value;
-    else if (t.dataset.num) { var v = +t.value; if (!(v >= 1000)) return; P[t.dataset.num] = Math.min(v, 1e7); }
-    else return;
-    if (P.splitYear <= P.startYear) { if (t.dataset.rng === "startYear") P.splitYear = Math.min(2024, P.startYear + 2); else P.startYear = Math.max(2006, P.splitYear - 2); }
-    syncParams(); schedule();
-  });
-  $("params").addEventListener("click", function (e) {
-    var b = e.target.closest("[data-preset]");
-    if (b) { P = Object.assign({}, E.DEFAULTS, { capital: P.capital, cost: P.cost, startYear: P.startYear, splitYear: P.splitYear }, PRESETS[b.dataset.preset]); syncParams(); schedule(); }
-    if (e.target.id === "reset") { P = Object.assign({}, E.DEFAULTS); syncParams(); schedule(); }
-  });
+  return h;
 }
-function findSub(k) { var r; SCHEMA.forEach(function (g) { g.items.forEach(function (it) { (it.s || []).forEach(function (s) { if (s.k === k) r = s; }); }); }); return r; }
+function findSub(k) { var r; SCHEMA.concat(TX_SCHEMA).forEach(function (g) { g.items.forEach(function (it) { (it.s || []).forEach(function (s) { if (s.k === k) r = s; }); }); }); return r; }
 function syncParams() {
   document.querySelectorAll("[data-tog]").forEach(function (el) { el.checked = !!P[el.dataset.tog]; el.closest(".rule").classList.toggle("off", !el.checked); });
   document.querySelectorAll("[data-rng]").forEach(function (el) { el.value = P[el.dataset.rng]; $("o-" + el.dataset.rng).textContent = fmtParam(findSub(el.dataset.rng), P[el.dataset.rng]); });
+  document.querySelectorAll("[data-sel]").forEach(function (el) { el.value = P[el.dataset.sel]; });
+  var isTx = P.mode === "tx4";
+  document.querySelectorAll("#params [data-classic], #presets, #reset").forEach(function (el) { el.hidden = isTx; });
+  var wr = document.querySelector('#params [data-rule="weekly"]'); if (wr) wr.hidden = isTx;
+  $("mode-note").hidden = !isTx;
+  document.querySelectorAll("#tx-mode [data-mode]").forEach(function (b) { b.setAttribute("aria-pressed", b.dataset.mode === P.mode ? "true" : "false"); });
   var cap = $("p-capital"); if (document.activeElement !== cap) cap.value = P.capital;
   document.querySelectorAll("[data-preset]").forEach(function (b) {
     var want = Object.assign({}, E.DEFAULTS, PRESETS[b.dataset.preset]), same = true;
-    for (var k in want) if (["capital", "cost", "startYear", "splitYear"].indexOf(k) < 0 && want[k] !== P[k]) same = false;
+    for (var k in want) if (["capital", "cost", "startYear", "splitYear", "mode"].indexOf(k) < 0 && k.charAt(0) !== "x" && want[k] !== P[k]) same = false;
     b.setAttribute("aria-pressed", same ? "true" : "false");
   });
   persist();
@@ -608,17 +680,68 @@ function drawChart(el, o) {
   svg.addEventListener("pointermove", move); svg.addEventListener("pointerdown", move); svg.addEventListener("pointerleave", leave);
 }
 function legend(el, items) { el.innerHTML = items.map(function (s) { return "<span>" + (s.glyph ? '<em style="color:' + s.color + '">' + s.glyph + "</em>" : '<i class="' + (s.dash ? "dash" : "") + '" style="border-color:' + s.color + '"></i>') + esc(s.name) + "</span>"; }).join(""); }
-function sample(a, b) { var out = []; for (var i = a; i <= b; i++) if (i === a || i === b || R.evalDays[i] || !P.weekly && (i - a) % 5 === 0) out.push(i); if (!P.weekly) out = out.filter(function (i, k) { return i === a || i === b || (i - a) % 5 === 0; }); return out; }
+function sample(a, b) { var out = []; for (var i = a; i <= b; i++) if (i === a || i === b || R.evalDays[i] || !evalWeekly() && (i - a) % 5 === 0) out.push(i); if (!evalWeekly()) out = out.filter(function (i, k) { return i === a || i === b || (i - a) % 5 === 0; }); return out; }
 
 /* ---------- obliczenia i widok Strategia ---------- */
+var RX = null, STUDY = null;   // wynik reguł Tx4 i badanie sygnałów; liczone dopiero, gdy są potrzebne
 function compute() {
-  R = E.run(M, P); SC = E.scan(M, R);
+  R = E.run(M, P); SC = E.scan(M, R); RX = P.mode === "tx4" ? R : null; STUDY = null;
   renderStrategy(); renderScanner(); renderPortfolio(); renderMethod();
+  if (!$("view-tx4").hidden) renderTx4();
+}
+var TXN = { fws: "fałszywe wybicie", fwd: "fałszywe wybicie podwójne", tr: "trójka", entry: "wszystkie warunki kupna razem" };
+function renderTx4() {
+  if (!RX) RX = E.run(M, Object.assign({}, P, { mode: "tx4" }));
+  if (!STUDY) STUDY = E.tx4Study(M, RX);
+  var S = RX.stats.all, B = RX.stats.allB, O = RX.stats.oos, OB = RX.stats.oosB, on = P.mode === "tx4", wk = P.xFrames === "WM";
+  $("tx-mode-note").textContent = on ? "Skaner, Portfel i zakładka Strategia pokazują teraz wyniki reguł Tx4." : "Reguły Tx4 są teraz tylko testowane w tej zakładce. Skaner i Portfel liczą według reguł z zakładki Strategia.";
+  var al = "";
+  if (!M.tickers[0].h) al = "Dane nie zawierają cen maksymalnych i minimalnych, więc świece są przybliżone otwarciem i zamknięciem. Wyniki nie są wiarygodne.";
+  else if (!(P.xFws || P.xFwd || P.xTr)) al = "Włącz przynajmniej jeden rodzaj sygnału. Bez niego reguły nigdy nie kupują.";
+  else if (!(P.xExitSig || P.xUseDef || P.xExitChar || P.xUseTrail)) al = "Żaden warunek sprzedaży nie jest włączony. Reguły kupują i trzymają do końca testu.";
+  $("tx-alert").innerHTML = al ? '<div class="alert" role="alert" style="margin-bottom:10px">' + al + "</div>" : "";
+  var tiles = [
+    ["Zysk roczny", pct(S.cagr, 1, true), "kup i trzymaj <b>" + pct(B.cagr, 1, true) + "</b>", "t-cagr"],
+    ["Najgłębsze obsunięcie", pct(S.maxDD), "kup i trzymaj <b>" + pct(B.maxDD) + "</b>", "gauge"],
+    ["W okresie sprawdzianu", pct(O.cagr, 1, true), "kup i trzymaj <b>" + pct(OB.cagr, 1, true) + "</b>", "col-oos"],
+    ["Transakcje zamknięte", String(S.trades), "zyskownych <b>" + pct(S.winRate, 0) + "</b>", "t-trades"],
+    ["Zysk do strat", isFinite(S.profitFactor) ? nf(S.profitFactor, 2) : "–", "suma zysków przez sumę strat", "t-pf"],
+    ["Czas w rynku", pct(S.exposure, 0), "średni udział akcji w kapitale", "t-expo"]
+  ];
+  $("tx-tiles").innerHTML = tiles.map(function (t) { return '<div class="tile" data-tip="' + t[3] + '"><span class="lab">' + t[0] + '</span><span class="val">' + t[1] + '</span><span class="cmp">' + t[2] + "</span></div>"; }).join("");
+  var nU = RX.inU.filter(Boolean).length;
+  $("tx-note").innerHTML = "Test za lata " + Math.floor(M.dates[RX.start] / 10000) + "–" + Math.floor(M.dates[RX.end] / 10000) + " na " + nU + " walorach, decyzje na zamknięciu " + (wk ? "tygodnia" : "sesji") + ", transakcje na otwarciu następnej sesji. Kapitał, koszty i limit pozycji pochodzą z zakładki Strategia. " +
+    (on ? 'Wykres kapitału i listę transakcji zobaczysz w zakładce <a href="#strategia">Strategia</a>.' : "Wykres kapitału i lista transakcji pojawią się w zakładce Strategia, gdy przełączysz analizator na reguły Tx4.") +
+    (P.xAll ? " Walory z GPW są liczone w złotych, bez wpływu kursu walut." : "");
+  var hs = STUDY.horizons, base = STUDY.base;
+  function cell(hit, cnt) { return cnt >= 20 ? pct(hit / cnt, 1) : "–"; }
+  function srow(r) {
+    var up = r.dir > 0, name = r.key === "entry" ? TXN.entry : TXN[r.type] + (up ? " wzrostowe" : " spadkowe");
+    if (r.type === "tr") name = "trójka " + (up ? "wzrostowa" : "spadkowa");
+    return "<tr><td>" + (r.key === "entry" ? "<b>" + name + "</b>" : (up ? "▲ " : "▼ ") + name) + "</td><td class='num'>" + nf(r.n, 0) + "</td>" + hs.map(function (h, k) { return "<td class='num'>" + cell(r.hit[k], r.cnt[k]) + "</td>"; }).join("") + "<td class='num'>" + (r.cnt[1] >= 20 ? pct(r.sum / r.cnt[1], 1, true) : "–") + "</td></tr>";
+  }
+  var ups = STUDY.rows.filter(function (r) { return r.dir > 0; }), dns = STUDY.rows.filter(function (r) { return r.dir < 0; });
+  $("tx-study").innerHTML = "<thead><tr><th style='text-align:left'>Sygnał</th><th data-tip='ts-n'>Liczba</th>" + hs.map(function (h) { return "<th data-tip='ts-h'>Po " + h + " świecach</th>"; }).join("") + "<th data-tip='ts-avg'>Śr. zmiana po 10</th></tr></thead><tbody>" +
+    "<tr><th colspan='6'>Kurs wyżej po sygnale wzrostowym</th></tr>" + ups.map(srow).join("") +
+    "<tr><td>tło: dowolna świeca</td><td class='num'>" + nf(base.n, 0) + "</td>" + hs.map(function (h, k) { return "<td class='num'>" + cell(base.up[k], base.cnt[k]) + "</td>"; }).join("") + "<td class='num'>" + pct(base.sum / base.cnt[1], 1, true) + "</td></tr>" +
+    "<tr><th colspan='6'>Kurs niżej po sygnale spadkowym</th></tr>" + dns.map(srow).join("") +
+    "<tr><td>tło: dowolna świeca</td><td class='num'>" + nf(base.n, 0) + "</td>" + hs.map(function (h, k) { return "<td class='num'>" + cell(base.cnt[k] - base.up[k], base.cnt[k]) + "</td>"; }).join("") + "<td class='num'>" + pct(base.sum / base.cnt[1], 1, true) + "</td></tr></tbody>";
+  $("tx-study-note").textContent = "Świece " + (wk ? "tygodniowe" : "dzienne") + " z okresu testu. Porównuj każdy wiersz z tłem: jeśli sygnał wzrostowy daje wzrost tak samo często jak dowolna świeca, sam niczego nie zapowiada i potrzebuje dodatkowego warunku.";
+  var now = E.tx4Now(M, RX), ages = ["Ostatnia zakończona świeca", "Poprzednia świeca", "Dwie świece temu"], body = "", lastAge = -1, L = " style='text-align:left'";
+  now.slice(0, 40).forEach(function (x) {
+    if (x.age !== lastAge) { lastAge = x.age; body += "<tr><th colspan='5'" + L + ">" + ages[x.age] + ", do " + dstr(M.dates[x.i]) + "</th></tr>"; }
+    var nm = x.type === "tr" ? "trójka " + (x.dir > 0 ? "wzrostowa" : "spadkowa") : TXN[x.type] + (x.dir > 0 ? " wzrostowe" : " spadkowe");
+    body += "<tr" + (x.on ? "" : " class='off'") + "><td><b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b></td><td" + L + ">" + (x.dir > 0 ? "▲ " : "▼ ") + nm + "</td><td class='num'>" + price(x.level) + unitOf(x.s) + "</td><td" + L + ">" + (x.dir > 0 ? (x.sup ? "tak" : "nie") : "–") + "</td><td" + L + ">" + (x.ch > 0 ? "wzrostowy" : x.ch < 0 ? "spadkowy" : "brak") + "</td></tr>";
+  });
+  $("tx-now").innerHTML = "<thead><tr><th>Walor</th><th data-tip='tn-sig'" + L + ">Sygnał</th><th data-tip='tn-level'>Poziom</th><th data-tip='tn-sup'" + L + ">Przy wsparciu</th><th data-tip='tn-char'" + L + ">Charakter</th></tr></thead><tbody>" +
+    (body || "<tr><td colspan='5'" + L + ">Brak sygnałów na trzech ostatnich świecach.</td></tr>") + "</tbody>";
+  $("tx-now-note").textContent = (now.length > 40 ? "Pokazano 40 z " + now.length + " sygnałów. " : "") + "Sygnał w tej tabeli to jeszcze nie polecenie kupna. Polecenia według wszystkich włączonych warunków są w zakładce Portfel, gdy analizator liczy według reguł Tx4.";
 }
 function drawdown(arr, a) { var out = new Float64Array(N), pk = arr[a]; for (var i = a; i < N; i++) { if (arr[i] > pk) pk = arr[i]; out[i] = arr[i] / pk - 1; } return out; }
 var SER_S = { name: "Strategia", short: "Strategia", color: "var(--accent)" }, SER_B = { name: "Kup i trzymaj te same spółki", short: "Kup i trzymaj", color: "var(--series-2)", dash: true };
 function renderStrategy() {
   var S = R.stats.all, B = R.stats.allB, anyEntry = P.useTrend || P.useCross || P.useMom || P.usePosEps || P.useGrowth || P.usePe, anyExit = P.useTrendExit || P.useTrail || P.useFundExit;
+  if (P.mode === "tx4") { anyEntry = P.xFws || P.xFwd || P.xTr; anyExit = P.xExitSig || P.xUseDef || P.xExitChar || P.xUseTrail; }
   var al = "";
   if (!anyEntry) al = "Włącz przynajmniej jeden warunek kupna. Bez niego strategia nigdy nie otwiera pozycji.";
   else if (!anyExit) al = "Żaden warunek sprzedaży nie jest włączony. Strategia kupuje i trzyma do końca testu.";
@@ -668,7 +791,7 @@ function renderStrategy() {
     row("Transakcje zamknięte", function (s) { return s.trades; }) +
     row("Zyskownych", function (s) { return pct(s.winRate, 0); }) + "</tbody>";
 
-  var WHY = { stop: "spadek od szczytu", trend: "kurs pod średnią", zysk: "spadek zysku" };
+  var WHY = { stop: "spadek od szczytu", trend: "kurs pod średnią", zysk: "spadek zysku", obrona: "pod poziomem obrony", sig: "sygnał spadkowy", char: "spadkowy charakter" };
   var tr = R.trades.slice().reverse(), show = ui.allTrades ? tr : tr.slice(0, 10);
   $("trades").innerHTML = "<thead><tr><th data-tip='tr-sym'>Spółka</th><th data-tip='tr-buy'>Kupno</th><th data-tip='tr-bpx'>Cena</th><th data-tip='tr-sell'>Sprzedaż</th><th data-tip='tr-spx'>Cena</th><th data-tip='tr-ret'>Wynik</th><th data-tip='tr-why'>Powód</th></tr></thead><tbody>" + show.map(function (t) {
     return "<tr><td><b data-tip='sym:" + t.s + "'>" + t.s + "</b></td><td class='num'>" + dstr(M.dates[t.entryIdx]) + "</td><td class='num'>" + price(t.entryPx) + "</td><td class='num'>" + (t.open ? "otwarta" : dstr(M.dates[t.exitIdx])) + "</td><td class='num'>" + price(t.exitPx) + "</td><td class='num " + cls(t.ret) + "'>" + pct(t.ret, 1, true) + "</td><td>" + (t.open ? "w portfelu" : WHY[t.why]) + "</td></tr>";
@@ -679,18 +802,18 @@ function renderStrategy() {
 
 /* ---------- Skaner ---------- */
 var STATUS = { buy: ["good", "▲ Kup"], hold: ["acc", "● Trzymaj"], sell: ["crit", "▼ Sprzedaj"], out: ["mute", "○ Poza"] };
-var CK = { trend: "trend", cross: "średnie", mom: "wzrost kursu", eps: "zysk", growth: "wzrost zysku", pe: "P/E" };
+var CK = { trend: "trend", cross: "średnie", mom: "wzrost kursu", eps: "zysk", growth: "wzrost zysku", pe: "P/E", xsig: "sygnał", xchar: "charakter", xsup: "wsparcie", xroom: "miejsce" };
 function renderScanner() {
   var order = { buy: 0, sell: 1, hold: 2, out: 3 }, rows = SC.slice().sort(function (a, b) { return order[a.status] - order[b.status] || a.s.localeCompare(b.s); });
   var cnt = { buy: 0, sell: 0, hold: 0, out: 0 }; rows.forEach(function (r) { cnt[r.status]++; });
   $("scan-title").textContent = "Stan spółek na " + dstr(M.dates[N - 1]);
   $("scan-counts").innerHTML = ["buy", "sell", "hold", "out"].map(function (k) { return '<span class="pill ' + STATUS[k][0] + '" data-tip="st-' + k + '">' + STATUS[k][1] + " " + cnt[k] + "</span>"; }).join("");
-  $("scan-note").textContent = "Stan wynika z parametrów ustawionych w zakładce Strategia i jest liczony dla każdej spółki osobno, bez limitu pozycji. Kup i Sprzedaj oznaczają sygnał z ostatnich 5 sesji. Sygnały powstają na zamknięciu " + (P.weekly ? "ostatniej sesji tygodnia" : "każdej sesji") + ", a zlecenie zakładam na otwarciu następnej. Skaner nie zna Twoich prawdziwych pozycji: wpisujesz je w zakładce Portfel.";
-  var h = '<div class="srow head"><span data-tip="sc-state">Stan</span><span data-tip="sc-sym">Spółka</span><span class="c" data-tip="c-close">Kurs ($)</span><span class="c" data-tip="c-since">Od zakupu</span><span class="c" data-tip="c-stop">Próg sprzedaży</span><span class="c" data-tip="c-tostop">Zapas do progu</span><span data-tip="c-checks">Warunki kupna</span></div>';
+  $("scan-note").textContent = "Stan wynika z " + (P.mode === "tx4" ? "reguł Tx4 ustawionych w zakładce Tx4" : "parametrów ustawionych w zakładce Strategia") + " i jest liczony dla każdej spółki osobno, bez limitu pozycji. Kup i Sprzedaj oznaczają sygnał z ostatnich 5 sesji. Sygnały powstają na zamknięciu " + (evalWeekly() ? "ostatniej sesji tygodnia" : "każdej sesji") + ", a zlecenie zakładam na otwarciu następnej. Skaner nie zna Twoich prawdziwych pozycji: wpisujesz je w zakładce Portfel.";
+  var h = '<div class="srow head"><span data-tip="sc-state">Stan</span><span data-tip="sc-sym">Spółka</span><span class="c" data-tip="c-close">Kurs</span><span class="c" data-tip="c-since">Od zakupu</span><span class="c" data-tip="c-stop">Próg sprzedaży</span><span class="c" data-tip="c-tostop">Zapas do progu</span><span data-tip="c-checks">Warunki kupna</span></div>';
   rows.forEach(function (r) {
     var open = ui.openTicker === r.s;
     h += '<button class="srow" type="button" data-tk="' + r.s + '" aria-expanded="' + open + '"><span><span class="pill ' + STATUS[r.status][0] + '" data-tip="st-' + r.status + '">' + STATUS[r.status][1] + '</span></span><span class="name" data-tip="row"><span class="tk" data-tip="sym:' + r.s + '">' + r.s + '</span> <span class="nm">' + esc(r.n) + "</span></span>" +
-      '<span class="c num" data-tip="c-close"><small>Kurs ($)</small>' + price(r.close) + '</span><span class="c num ' + cls(r.sinceEntry) + '" data-tip="c-since"><small>Od zakupu</small>' + (r.inPos ? pct(r.sinceEntry, 1, true) : "–") + '</span><span class="c num" data-tip="c-stop"><small>Próg sprzedaży</small>' + (r.inPos ? price(r.stop) : "–") + '</span><span class="c num" data-tip="c-tostop"><small>Zapas do progu</small>' + (r.inPos ? (r.toStop >= 0 ? "przekroczony" : pct(-r.toStop, 1)) : "–") + "</span>" +
+      '<span class="c num" data-tip="c-close"><small>Kurs</small>' + price(r.close) + unitOf(r.s) + '</span><span class="c num ' + cls(r.sinceEntry) + '" data-tip="c-since"><small>Od zakupu</small>' + (r.inPos ? pct(r.sinceEntry, 1, true) : "–") + '</span><span class="c num" data-tip="c-stop"><small>Próg sprzedaży</small>' + (r.inPos ? price(r.stop) : "–") + '</span><span class="c num" data-tip="c-tostop"><small>Zapas do progu</small>' + (r.inPos ? (r.toStop >= 0 ? "przekroczony" : pct(-r.toStop, 1)) : "–") + "</span>" +
       '<span class="checks">' + r.checks.map(function (c) { return '<span class="ck ' + (c[1] ? "ok" : "no") + '" data-tip="ck-' + c[0] + '">' + (c[1] ? "✓ " : "✗ ") + CK[c[0]] + "</span>"; }).join("") + "</span></button>";
     if (open) h += '<div class="detail" id="detail"></div>';
   });
@@ -954,7 +1077,7 @@ function renderPortfolio() {
       "Powód: " + E.WHY[x.sig.why] + ". " + (x.fresh ? "Sygnał z zamknięcia " + dstr(M.dates[x.sig.i]) + ", zlecenie na otwarciu najbliższej sesji." : "Zaległy sygnał z " + dstr(M.dates[x.sig.i]) + ": reguły zamknęłyby tę pozycję już wtedy."));
   });
   (byType.watch || []).forEach(function (x) {
-    h += act("watch", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · kurs " + price(x.close) + unit(x.cur) + " jest poniżej progu sprzedaży " + price(x.stop) + unit(x.cur), "Reguły oceniają sygnały na zamknięciu ostatniej sesji tygodnia. Do tego czasu nic nie rób.");
+    h += act("watch", "<b data-tip='sym:" + esc(x.s) + "'>" + esc(x.s) + "</b> · kurs " + price(x.close) + unit(x.cur) + " jest poniżej progu sprzedaży " + price(x.stop) + unit(x.cur), evalWeekly() ? "Reguły oceniają sygnały na zamknięciu ostatniej sesji tygodnia. Do tego czasu nic nie rób." : "Reguły oceniają sygnały na zamknięciu sesji. Do tego czasu nic nie rób.");
   });
   (byType.buy || []).forEach(function (x) {
     var size = !isFinite(x.amount) ? "za " + pct(A.weight, 1) + " kapitału" : x.amount < 1 ? "brak wolnej gotówki na zakup" : "za około " + mon(x.amount) + ", czyli około " + nf(x.shares, 2) + " akcji przy kursie " + price(x.close) + " $";
@@ -1132,11 +1255,25 @@ function renderMethod() {
   if (P.useTrail) sell.push("kurs spadnie o " + P.trail + "% od najwyższego zamknięcia po zakupie");
   if (P.useTrendExit) sell.push("kurs zamknie się ponad " + P.exitBuffer + "% poniżej średniej z " + P.smaLong + " sesji");
   if (P.useFundExit) sell.push("zysk na akcję spadnie rok do roku poniżej " + pc(P.growthExit, 0, true));
+  var tx = P.mode === "tx4", fz = P.xFrames === "WM" ? "tygodniowej" : "dziennej", fc = P.xFrames === "WM" ? "miesięcznych" : "tygodniowych";
+  if (tx) {
+    var types = []; if (P.xFws) types.push("fałszywe wybicie pojedyncze"); if (P.xFwd) types.push("fałszywe wybicie podwójne"); if (P.xTr) types.push("trójka");
+    buy = []; sell = [];
+    if (types.length) buy.push("na zakończonej świecy " + fz + " powstał sygnał wzrostowy: " + types.join(", ") + (P.xUseReact ? ", ze świecą reakcji zamkniętą co najmniej na " + P.xReact + "% wysokości" : ""));
+    if (P.xUseChar) buy.push("ostatni sygnał na świecach " + fc + " był wzrostowy");
+    if (P.xUseSup) buy.push("sygnał powstał przy strefie wsparcia, z tolerancją " + nf(P.xSupTol, 1) + "%");
+    if (P.xUseRoom) buy.push("do najbliższej strefy oporu nad kursem zostało co najmniej " + P.xRoom + "%");
+    if (P.xExitSig && types.length) sell.push("na zakończonej świecy " + fz + " powstanie sygnał spadkowy");
+    if (P.xUseDef) sell.push("świeca zamknie się pod poziomem obrony, czyli pod minimum sygnału kupna");
+    if (P.xExitChar) sell.push("ostatni sygnał na świecach " + fc + " będzie spadkowy");
+    if (P.xUseTrail) sell.push("kurs spadnie o " + P.xTrail + "% od najwyższego zamknięcia po zakupie");
+  }
   function ul(a, none) { return a.length ? "<ul>" + a.map(function (x) { return "<li>" + x + "</li>"; }).join("") + "</ul>" : "<p>" + none + "</p>"; }
   $("metoda").innerHTML =
     '<div class="card"><h2>Twoje reguły słowami</h2><p><b>Kupuję, gdy wszystkie warunki są spełnione:</b></p>' + ul(buy, "Brak warunków kupna.") +
     '<p style="margin-top:12px"><b>Sprzedaję, gdy spełni się którykolwiek:</b></p>' + ul(sell, "Brak warunków sprzedaży.") +
-    '<p style="margin-top:12px">Sygnały sprawdzam ' + (P.weekly ? "raz w tygodniu, na zamknięciu ostatniej sesji" : "codziennie na zamknięciu") + ". Trzymam najwyżej " + P.maxPos + " pozycji. Gdy kandydatów jest więcej niż wolnych miejsc, wybieram spółki o najsilniejszym wzroście kursu. Po sprzedaży czekam " + P.cooldownWeeks + " tyg. przed ponownym zakupem tej samej spółki.</p></div>" +
+    '<p style="margin-top:12px">Sygnały sprawdzam ' + (evalWeekly() ? "raz w tygodniu, na zamknięciu ostatniej sesji" : "codziennie na zamknięciu") + ". Trzymam najwyżej " + P.maxPos + " pozycji. Gdy kandydatów jest więcej niż wolnych miejsc, wybieram spółki o najsilniejszym wzroście kursu. Po sprzedaży czekam " + (tx ? P.xCool : P.cooldownWeeks) + " tyg. przed ponownym zakupem tej samej spółki.</p>" +
+    (tx ? '<p style="margin-top:12px"><b>To reguły Tx4 w wersji roboczej.</b> Sygnały i strefy są zapisane według lekcji techniki Tx4. Definicja świecy reakcji, sposób wyznaczania punktów zmiany i całe połączenie klocków w decyzje są robocze. Reguły nie zawierają sygnału impulsu, konsolidacji, układów cenowych, prognozy trendu ani systemu zarządzania pozycją, bo tych części nie było w materiałach.</p>' : "") + "</div>" +
     '<div class="card"><h2>Jak liczony jest test</h2><ul>' +
     "<li>Sygnał powstaje na zamknięciu sesji, a transakcja jest liczona po cenie otwarcia następnej sesji.</li>" +
     "<li>Każda transakcja jest obciążona kosztem " + nf(P.cost, 2) + "% wartości. Akcje ułamkowe są dozwolone.</li>" +
@@ -1153,6 +1290,44 @@ function renderMethod() {
 
 /* ---------- podpowiedzi (najwyżej dwa zdania na funkcję) ---------- */
 var TIPS = {
+  "nav-tx4": "Edytor reguł złożonych z klocków techniki Tx4, z testem na historii i badaniem samych sygnałów. To szkic do poprawiania, a nie gotowa strategia.",
+  "mode-classic": "Skaner, Portfel i zakładka Strategia liczą według reguł ze średnimi i zyskiem spółki. Reguły Tx4 są wtedy tylko testowane w tej zakładce.",
+  "mode-tx4": "Skaner, Portfel i zakładka Strategia liczą według reguł Tx4 ustawionych poniżej. Wybór jest zapisywany osobno dla każdej osoby.",
+  "tx-reset": "Przywraca wyjściowe ustawienia reguł Tx4. Nie zmienia kapitału, kosztów ani reguł z zakładki Strategia.",
+  "xFrames": "Ramy zarządzania to świece, na których zapadają decyzje, a ramy charakteru to świece o stopień wyższe, które wskazują kierunek. Tydzień i miesiąc pasuje do trzymania pozycji miesiącami, dzień i tydzień daje znacznie więcej transakcji.",
+  "xFws": "Świeca schodzi pod minimum poprzedniej świecy, ale zamyka się z powrotem nad nim. Wersja spadkowa działa lustrzanie na maksimum.",
+  "xFwd": "Układ trzech świec: druga zamyka się pod minimum pierwszej, a trzecia wraca nad to minimum. Wersja spadkowa działa lustrzanie.",
+  "xTr": "Trzy świece: druga ma niższy szczyt i dołek, trzecia wyższy szczyt i dołek, a do tego powstaje objęcie hossy albo przenikanie. Wersja spadkowa wymaga objęcia bessy albo zasłony ciemnej chmury.",
+  "xUseReact": "Sygnał fałszywego wybicia liczy się tylko wtedy, gdy świeca zamyka się wyraźnie po stronie powrotu. Definicja świecy reakcji jest robocza, bo nie było jej w lekcjach.",
+  "xReact": "Jak wysoko w zakresie świecy musi wypaść zamknięcie, licząc od minimum. Dla sygnałów spadkowych liczy się odwrotnie, od maksimum.",
+  "xUseChar": "Kupno tylko wtedy, gdy ostatni sygnał na ramach charakteru był wzrostowy. To robocze przełożenie zasady, że wyższe ramy decydują o kierunku.",
+  "xUseSup": "Kupno tylko wtedy, gdy sygnał powstał przy strefie wsparcia: minimum układu dotknęło strefy albo ją przebiło, a zamknięcie zostało nad jej dolną granicą.",
+  "xSupTol": "O ile procent minimum sygnału może nie dojść do górnej granicy strefy wsparcia, żeby sygnał nadal liczył się jako powstały przy wsparciu.",
+  "xUseRoom": "Kupno tylko wtedy, gdy do najbliższej strefy oporu nad kursem zostało dość miejsca. Brak oporu nad kursem spełnia warunek.",
+  "xRoom": "Minimalna odległość od kursu zamknięcia do dolnej granicy najbliższego oporu.",
+  "xPivot": "Ile świec z każdej strony musi mieć wyższe minimum, żeby dołek uznać za punkt zmiany, od którego powstaje strefa wsparcia. Dla szczytów i oporu działa to lustrzanie.",
+  "xZoneMem": "Po ilu świecach strefa wsparcia lub oporu przestaje być brana pod uwagę.",
+  "xExitSig": "Sprzedaż, gdy na ramach zarządzania pojawi się włączony sygnał spadkowy.",
+  "xUseDef": "Sprzedaż, gdy świeca zamknie się pod minimum sygnału, po którym kupiono. Dla pozycji z Portfela poziomem obrony jest minimum ostatniego sygnału wzrostowego sprzed zakupu, a gdy go nie było, minimum trzech ostatnich świec.",
+  "xExitChar": "Sprzedaż, gdy ostatni sygnał na ramach charakteru jest spadkowy.",
+  "xUseTrail": "Dodatkowa sprzedaż po spadku kursu o zadany procent od najwyższego zamknięcia po zakupie. To zabezpieczenie spoza Tx4.",
+  "xTrail": "Wielkość spadku od najwyższego zamknięcia po zakupie, po której pozycja jest sprzedawana.",
+  "xCool": "Ile tygodni po sprzedaży reguły nie kupują ponownie tego samego waloru.",
+  "xAll": "Włącza do testu także walory, dla których aplikacja ma same kursy: spółki z GPW, ETF-y i złoto. Reguły Tx4 nie potrzebują danych o zyskach.",
+  "h-tx-test": "Test reguł Tx4 na historii, z tymi samymi kosztami, kapitałem i limitem pozycji co w zakładce Strategia. Punkt odniesienia to trzymanie wszystkich walorów z testu w równych częściach.",
+  "h-tx-study": "Sprawdza same sygnały, bez portfela: jak często po sygnale kurs był po zapowiadanej stronie po 5, 10 i 20 świecach. Sygnał ma wartość dopiero wtedy, gdy wyraźnie odbiega od tła.",
+  "h-tx-now": "Sygnały z trzech ostatnich zakończonych świec na ramach zarządzania, dla wszystkich walorów aplikacji.",
+  "ts-n": "Ile razy sygnał wystąpił w okresie testu na wszystkich walorach.",
+  "ts-h": "Odsetek przypadków, w których kurs zamknięcia po tylu świecach był po stronie zapowiadanej przez sygnał: wyżej dla wzrostowych, niżej dla spadkowych.",
+  "ts-avg": "Średnia zmiana kursu zamknięcia po 10 świecach od sygnału.",
+  "tn-sig": "Rodzaj i kierunek sygnału. Wyszarzony sygnał jest wyłączony w edytorze.",
+  "tn-level": "Skrajna cena układu: minimum dla sygnału wzrostowego, maksimum dla spadkowego. Dla wzrostowego to poziom obrony po zakupie.",
+  "tn-sup": "Czy sygnał powstał przy strefie wsparcia według ustawień edytora.",
+  "tn-char": "Kierunek ostatniego sygnału na ramach charakteru w chwili sygnału.",
+  "ck-xsig": "Czy na ostatniej zakończonej świecy ram zarządzania jest włączony sygnał wzrostowy.",
+  "ck-xchar": "Czy ostatni sygnał na ramach charakteru był wzrostowy.",
+  "ck-xsup": "Czy ostatnia świeca dotknęła strefy wsparcia i zamknęła się nad jej dolną granicą.",
+  "ck-xroom": "Czy do najbliższej strefy oporu nad kursem zostało wymagane miejsce.",
   "nav-strategia": "Tu ustawiasz reguły kupna i sprzedaży i od razu widzisz, jak sprawdziłyby się w przeszłości.",
   "nav-skaner": "Pokazuje, co Twoje reguły mówią dziś o każdej spółce: kupić, trzymać, sprzedać czy czekać.",
   "nav-metoda": "Twoje reguły zapisane zwykłymi zdaniami oraz założenia i ograniczenia testu.",
@@ -1320,6 +1495,15 @@ function renderInstruction() {
       (it.s || []).forEach(function (s) { params += rows([[s.l, s.k]]); });
     });
   });
+  var txp = "";
+  TX_SCHEMA.forEach(function (g) {
+    txp += '<tr><th colspan="2">' + g.t + "</th></tr>";
+    g.items.forEach(function (it) {
+      if (it.sel) { txp += rows([[it.l, it.sel]]); return; }
+      if (it.k) txp += rows([[it.l, it.k]]);
+      (it.s || []).forEach(function (s) { txp += rows([[s.l, s.k]]); });
+    });
+  });
   $("instrukcja").innerHTML =
     '<div class="card"><h2>Do czego służy aplikacja</h2><p>Analizator giełdy sprawdza Twoje reguły kupna i sprzedaży na danych historycznych, a potem stosuje je do aktualnych notowań. Nie przewiduje kursów. Pilnuje, żeby decyzje wynikały z reguł, które wcześniej przetestowałeś.</p>' +
     '<p style="margin-top:8px">Każdy element ma krótką podpowiedź. Na komputerze najedź na niego myszką, a na telefonie go dotknij. Podpowiedzi wyłączysz i włączysz przyciskiem „Podpowiedzi” u góry strony.</p><p style="margin-top:12px"><button class="chip primary" type="button" data-tour-start data-tip="tour">Uruchom samouczek</button></p></div>' +
@@ -1331,13 +1515,16 @@ function renderInstruction() {
     "<li>Przejdź do Skanera i zobacz, co reguły mówią dziś o każdej spółce.</li>" +
     "<li>W zakładce Portfel wpisz swoje pozycje i wolną gotówkę. Lista Do zrobienia pokaże, co sprzedać, co kupić i co trzymać.</li>" +
     "<li>W zakładce Metoda przeczytaj reguły zapisane słowami i ograniczenia testu, zanim użyjesz sygnałów na prawdziwych pieniądzach.</li></ol></div>" +
-    '<div class="card"><h2>Zakładki</h2><div class="scroll"><table class="ptab">' + rows([["Strategia", "nav-strategia"], ["Skaner", "nav-skaner"], ["Portfel", "nav-portfel"], ["Metoda", "nav-metoda"], ["Instrukcja", "nav-instrukcja"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Zakładki</h2><div class="scroll"><table class="ptab">' + rows([["Strategia", "nav-strategia"], ["Tx4", "nav-tx4"], ["Skaner", "nav-skaner"], ["Portfel", "nav-portfel"], ["Metoda", "nav-metoda"], ["Instrukcja", "nav-instrukcja"]]) + "</table></div></div>" +
     '<div class="card"><h2>Strategia: gotowe zestawy</h2><div class="scroll"><table class="ptab">' + rows([["Trend i zysk", "preset:Trend i zysk"], ["Ostrożny", "preset:Ostrożny"], ["Agresywny", "preset:Agresywny"], ["Przywróć domyślne", "reset"], ["Uchwyt między panelem a wynikami", "split"]]) + "</table></div></div>" +
     '<div class="card"><h2>Strategia: parametry</h2><div class="scroll"><table class="ptab">' + params + rows([["Podsumowanie pozycji", "derived"]]) + "</table></div></div>" +
+    '<div class="card"><h2>Tx4: edytor reguł</h2><p style="margin:0 0 8px">Reguły Tx4 to szkic złożony z klocków techniki Tx4. Służy do sprawdzania i poprawiania, a nie do ślepego stosowania.</p><div class="scroll"><table class="ptab">' +
+    rows([["Trend i zysk", "mode-classic"], ["Tx4 (szkic)", "mode-tx4"], ["Przywróć domyślne", "tx-reset"]]) + txp +
+    '<tr><th colspan="2">Wyniki</th></tr>' + rows([["Wynik testu reguł Tx4", "h-tx-test"], ["Badanie sygnałów", "h-tx-study"], ["Sygnały z ostatnich świec", "h-tx-now"]]) + "</table></div></div>" +
     '<div class="card"><h2>Strategia: wyniki</h2><div class="scroll"><table class="ptab">' + rows([["Werdykt", "verdict"], ["Najgłębsze obsunięcie kapitału", "gauge"], ["Zysk roczny", "t-cagr"], ["Kapitał końcowy", "t-final"], ["Zysk roczny do obsunięcia", "t-mar"], ["Transakcje zamknięte", "t-trades"], ["Zysk do strat", "t-pf"], ["Czas w rynku", "t-expo"], ["Wykres: kapitał w czasie", "h-eq"], ["Wykres: obsunięcie kapitału", "h-dd"], ["Tabela: dopasowanie a sprawdzian", "h-periods"], ["Kolumna Dopasowanie", "col-ins"], ["Kolumna Sprawdzian", "col-oos"], ["Tabela: transakcje", "h-trades"], ["Transakcje: Kupno", "tr-buy"], ["Transakcje: Sprzedaż", "tr-sell"], ["Transakcje: Wynik", "tr-ret"], ["Transakcje: Powód", "tr-why"]]) + "</table></div></div>" +
     '<div class="card"><h2>Skaner</h2><div class="scroll"><table class="ptab">' +
     '<tr><th colspan="2">Stany spółki</th></tr>' + rows([["▲ Kup", "st-buy"], ["● Trzymaj", "st-hold"], ["▼ Sprzedaj", "st-sell"], ["○ Poza", "st-out"]]) +
-    '<tr><th colspan="2">Kolumny</th></tr>' + rows([["Kurs ($)", "c-close"], ["Od zakupu", "c-since"], ["Próg sprzedaży", "c-stop"], ["Zapas do progu", "c-tostop"], ["Warunki kupna", "c-checks"]]) +
+    '<tr><th colspan="2">Kolumny</th></tr>' + rows([["Kurs", "c-close"], ["Od zakupu", "c-since"], ["Próg sprzedaży", "c-stop"], ["Zapas do progu", "c-tostop"], ["Warunki kupna", "c-checks"]]) +
     '<tr><th colspan="2">Wykres spółki</th></tr>' + rows([["Rozwinięcie wiersza", "row"], ["5 lat", "range-5"], ["Cały test", "range-all"], ["Wykres w nowym oknie", "wk-open"]]) + "</table></div></div>" +
     '<div class="card"><h2>Portfel</h2><p style="margin-bottom:10px">Kapitał początkowy w Strategii służy tylko do testu na danych historycznych. Prawdziwe pozycje i gotówkę wpisujesz w Portfelu, a notowania odświeżają się automatycznie po każdej sesji w USA.</p><div class="scroll"><table class="ptab">' +
     '<tr><th colspan="2">Do zrobienia</th></tr>' + rows([["Lista poleceń", "h-todo"], ["▼ Sprzedaj", "a-sell"], ["▲ Kup", "a-buy"], ["◆ Obserwuj", "a-watch"], ["● Trzymaj", "a-hold"], ["○ Bez danych", "a-nodata"]]) +
@@ -1459,13 +1646,13 @@ document.addEventListener("click", function (e) { var c = e.target.closest ? e.t
 })();
 
 /* ---------- nawigacja i start ---------- */
-var VIEWS = ["strategia", "skaner", "portfel", "metoda", "instrukcja"];
+var VIEWS = ["strategia", "tx4", "skaner", "portfel", "metoda", "instrukcja"];
 function route() {
   if (SOLO) return;
   var v = (location.hash || "#strategia").slice(1); if (VIEWS.indexOf(v) < 0) v = "strategia";
   VIEWS.forEach(function (n) { $("view-" + n).hidden = n !== v; if (n === v) $("nav-" + n).setAttribute("aria-current", "page"); else $("nav-" + n).removeAttribute("aria-current"); });
   $("mini").style.display = v === "strategia" ? "" : "none";
-  if (R) { if (v === "strategia") renderStrategy(); if (v === "skaner") renderScanner(); }
+  if (R) { if (v === "strategia") renderStrategy(); if (v === "skaner") renderScanner(); if (v === "tx4") renderTx4(); }
 }
 $("asof").textContent = "Notowania do " + dstr(M.dates[N - 1]) + " · " + UNI.length + " popularnych spółek z USA";
 buildParams(); syncParams(); renderInstruction(); initPortfolio();
