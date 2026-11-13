@@ -21,13 +21,16 @@ function load(sym) {
   for (var i = 1; i < lines.length; i++) {
     var c = lines[i].split(",");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(c[0])) fail(sym + ": zła data w wierszu " + (i + 1));
-    rows.push({ d: c[0], o: c[1] === "" ? NaN : +c[1], c: c[4] === "" ? NaN : +c[4], e: c[6] === "" || c[6] === undefined ? null : +c[6] });
+    rows.push({ d: c[0], o: c[1] === "" ? NaN : +c[1], h: +c[2], l: +c[3], c: c[4] === "" ? NaN : +c[4], e: c[6] === "" || c[6] === undefined ? null : +c[6] });
   }
   if (rows.length < 500) fail(sym + ": za mało wierszy");
   return rows;
 }
 function addDays(d, n) { var t = new Date(d + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); }
 function r3(v) { return Math.round(v * 1000) / 1000; }
+/* cena maksymalna i minimalna sesji; gdy źródło ich nie podaje albo podaje sprzeczne, zakres świecy wyznacza otwarcie i zamknięcie */
+function hi(h, o, c) { return r3(Math.max(h > 0 ? h : 0, o, c)); }
+function lo(l, o, c) { return r3(Math.min(l > 0 ? l : Infinity, o, c)); }
 
 var all = {}, asOf = "9999-12-31";
 Object.keys(NAMES).forEach(function (s) { all[s] = load(s); var last = all[s][all[s].length - 1].d; if (last < asOf) asOf = last; });
@@ -38,14 +41,14 @@ function firstIdxOnOrAfter(d) { var lo = 0, hi = N; while (lo < hi) { var m = (l
 var filled = 0;
 var tickers = Object.keys(NAMES).map(function (s) {
   var rows = all[s], inRange = rows.filter(function (r) { return r.d >= START && r.d <= asOf; });
-  var o = new Array(N).fill(null), c = new Array(N).fill(null), first = -1;
+  var o = new Array(N).fill(null), c = new Array(N).fill(null), h = new Array(N).fill(null), l = new Array(N).fill(null), first = -1;
   inRange.forEach(function (r) {
     var i = pos[r.d]; if (i === undefined) fail(s + ": sesja " + r.d + " spoza kalendarza");
     if (!(r.o > 0) || !(r.c > 0)) fail(s + ": brak ceny " + r.d);
-    if (first < 0) first = i; o[i] = r3(r.o); c[i] = r3(r.c);
+    if (first < 0) first = i; o[i] = r3(r.o); c[i] = r3(r.c); h[i] = hi(r.h, r.o, r.c); l[i] = lo(r.l, r.o, r.c);
   });
   if (first < 0) fail(s + ": brak notowań w zakresie");
-  for (var i = first + 1; i < N; i++) if (c[i] === null) { c[i] = c[i - 1]; o[i] = c[i - 1]; filled++; }
+  for (var i = first + 1; i < N; i++) if (c[i] === null) { c[i] = c[i - 1]; o[i] = c[i - 1]; h[i] = c[i - 1]; l[i] = c[i - 1]; filled++; }
   if (c[N - 1] === null) fail(s + ": brak ostatniego kursu");
   /* kwartalne wartości zysku na akcję: źródło interpoluje je między końcami kwartałów */
   var e = rows.filter(function (r) { return r.e !== null; }), q = [];
@@ -62,7 +65,7 @@ var tickers = Object.keys(NAMES).map(function (s) {
       if (idx < N) q.push([idx, Math.round(r.e * 100) / 100, r.d]);
     });
   }
-  return { s: s, n: NAMES[s], start: first, o: o, c: c, q: q };
+  return { s: s, n: NAMES[s], start: first, o: o, c: c, h: h, l: l, q: q };
 });
 /* spółki dodatkowe: same kursy z drugiego źródła, tylko dla Portfela (bez testu i Skanera) */
 var extraNote = [];
@@ -70,20 +73,20 @@ if (arg.csv2) Object.keys(EXTRA).forEach(function (s) {
   var f = path.join(arg.csv2, s + ".csv"); if (!fs.existsSync(f)) { extraNote.push(s + ": brak pliku"); return; }
   var lines = fs.readFileSync(f, "utf8").trim().split(/\r?\n/);
   if (lines[0].trim() !== HEADER2 || lines.length < 20) { extraNote.push(s + ": zły format"); return; }
-  var o = new Array(N).fill(null), c = new Array(N).fill(null), first = -1, last = -1, bad = false;
+  var o = new Array(N).fill(null), c = new Array(N).fill(null), h = new Array(N).fill(null), l = new Array(N).fill(null), first = -1, last = -1, bad = false;
   for (var i = 1; i < lines.length; i++) {
     var p = lines[i].split(","), d = p[0]; if (d < START || d > asOf) continue;
     var k = pos[d]; if (k === undefined) continue;                 // sesja spoza kalendarza USA: pomiń
     var op = +p[1], cl = +p[4]; if (!(op > 0) || !(cl > 0)) { bad = true; break; }
-    if (first < 0) first = k; o[k] = r3(op); c[k] = r3(cl); last = k;
+    if (first < 0) first = k; o[k] = r3(op); c[k] = r3(cl); h[k] = hi(+p[2], op, cl); l[k] = lo(+p[3], op, cl); last = k;
   }
   if (bad || first < 0) { extraNote.push(s + ": brak poprawnych kursów"); return; }
-  for (i = first + 1; i < N; i++) if (c[i] === null) { c[i] = c[i - 1]; o[i] = c[i - 1]; filled++; }
+  for (i = first + 1; i < N; i++) if (c[i] === null) { c[i] = c[i - 1]; o[i] = c[i - 1]; h[i] = c[i - 1]; l[i] = c[i - 1]; filled++; }
   if (last < N - 1) extraNote.push(s + ": ostatni kurs z " + cal[last]);
   var meta = typeof EXTRA[s] === "string" ? { n: EXTRA[s] } : (EXTRA[s] || {}), tk = { s: s, n: meta.n || s, start: first, x: 1 };
   if (meta.cur === "PLN") tk.cur = "PLN";        // waluta notowań; brak pola oznacza dolary
   if (meta.m) tk.m = meta.m;                     // rynek poza USA (GPW, LSE): bez kursów na żywo
-  tk.o = o; tk.c = c; tk.q = []; tickers.push(tk);
+  tk.o = o; tk.c = c; tk.h = h; tk.l = l; tk.q = []; tickers.push(tk);
 });
 var M = { asOf: asOf, source: arg.source || "Pubmarks/datasets i yennanliu/finance_data (GitHub)", dates: cal.map(function (d) { return +d.replace(/-/g, ""); }), tickers: tickers };
 if (+arg.fx > 2 && +arg.fx < 8) M.fx = { USDPLN: +arg.fx, d: +String(arg.fxdate || "").replace(/-/g, "") || 0 };
@@ -102,7 +105,7 @@ if (prev) {
   });
 }
 function sig(t) { return t.s + t.n + (t.cur || "") + (t.m || ""); }
-var out = { ok: true, asOf: asOf, newData: !prev || asOf > prev.asOf || tickers.map(sig).join() !== prev.tickers.map(sig).join() || !!M.fx !== !!prev.fx, check: check };
+var out = { ok: true, asOf: asOf, newData: !prev || asOf > prev.asOf || tickers.map(sig).join() !== prev.tickers.map(sig).join() || !!M.fx !== !!prev.fx || !(prev.tickers[0] && prev.tickers[0].h), check: check };
 if (out.newData) fs.writeFileSync(arg.out, "window.MARKET=" + JSON.stringify(M) + ";\n");
 
 /* sygnały dla zapisanych parametrów i portfela */

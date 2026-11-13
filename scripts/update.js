@@ -28,19 +28,19 @@ async function get(url, tries) {
 function good(rows) { return rows.filter((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.d) && r.o > 0 && r.c > 0).sort((a, b) => (a.d < b.d ? -1 : 1)); }
 function fromYahoo(text) {
   const res = JSON.parse(text).chart.result[0], q = res.indicators.quote[0], off = res.meta.gmtoffset || 0;
-  const rows = good(res.timestamp.map((t, i) => ({ d: new Date((t + off) * 1000).toISOString().slice(0, 10), o: q.open[i], c: q.close[i], v: q.volume[i] || 0 })));
+  const rows = good(res.timestamp.map((t, i) => ({ d: new Date((t + off) * 1000).toISOString().slice(0, 10), o: q.open[i], h: q.high[i], l: q.low[i], c: q.close[i], v: q.volume[i] || 0 })));
   rows.cur = res.meta.currency || "";   // waluta notowań według źródła, do kontroli z tickers.json
   return rows;
 }
 function fromStooq(text) {
   const lines = text.trim().split(/\r?\n/);
   if (!/^Date,Open,High,Low,Close/i.test(lines[0])) throw new Error("nieoczekiwana odpowiedź Stooq");
-  return good(lines.slice(1).map((l) => { const p = l.split(","); return { d: p[0], o: +p[1], c: +p[4], v: +p[5] || 0 }; }));
+  return good(lines.slice(1).map((l) => { const p = l.split(","); return { d: p[0], o: +p[1], h: +p[2], l: +p[3], c: +p[4], v: +p[5] || 0 }; }));
 }
 function fromPrev(prev, sym) {
   const t = prev && prev.tickers.find((x) => x.s === sym); if (!t) return [];
   const rows = [];
-  for (let i = t.start; i < prev.dates.length; i++) if (t.c[i] != null) { const d = String(prev.dates[i]); rows.push({ d: d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6), o: t.o[i], c: t.c[i], v: 0 }); }
+  for (let i = t.start; i < prev.dates.length; i++) if (t.c[i] != null) { const d = String(prev.dates[i]); rows.push({ d: d.slice(0, 4) + "-" + d.slice(4, 6) + "-" + d.slice(6), o: t.o[i], h: t.h ? t.h[i] : "", l: t.l ? t.l[i] : "", c: t.c[i], v: 0 }); }
   return rows;
 }
 
@@ -71,7 +71,7 @@ function fromPrev(prev, sym) {
     if (rows.length < 20) { rows = fromPrev(prev, s); from = "poprzednie dane"; }
     if (rows.length < 20) { report.push(s + ": brak notowań w obu źródłach, spółka pominięta"); continue; }
     names[s] = { n: String(x.n || s).slice(0, 40), cur: cur, m: /^[A-Z]{2,5}$/.test(x.m || "") && x.m !== "US" ? x.m : "" };
-    fs.writeFileSync(path.join(TMP, "csv2", s + ".csv"), H2 + "\n" + rows.map((r) => [r.d, r.o, "", "", r.c, r.v, "", ""].join(",")).join("\n") + "\n");
+    fs.writeFileSync(path.join(TMP, "csv2", s + ".csv"), H2 + "\n" + rows.map((r) => [r.d, r.o, r.h > 0 ? r.h : "", r.l > 0 ? r.l : "", r.c, r.v, "", ""].join(",")).join("\n") + "\n");
     report.push(s + ": " + from + ", ostatnia sesja " + rows[rows.length - 1].d);
     await sleep(400);
   }
