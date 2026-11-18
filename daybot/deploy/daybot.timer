@@ -1,0 +1,11 @@
+# Start w dni robocze o 14:00 czasu polskiego. Bot sam czeka na otwarcie giełdy w USA
+# (zwykle 15:30, a przez kilka tygodni w roku 14:30) i sam kończy pracę po zamknięciu.
+[Unit]
+Description=Daybot: codzienny start
+
+[Timer]
+OnCalendar=Mon..Fri 14:00 Europe/Warsaw
+Persistent=false
+
+[Install]
+WantedBy=timers.target

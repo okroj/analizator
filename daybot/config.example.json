@@ -1,0 +1,16 @@
+{
+  "mode": "paper",
+  "liveConfirmed": "",
+  "liveMaxCapitalUsd": 500,
+  "botId": "daybot",
+  "symbols": ["AAPL", "ACN", "ADBE", "CRM", "DELL", "GOOG", "INTU", "LRCX", "META", "MSFT", "NFLX", "NVDA", "RMD", "SAP", "TSLA", "TSM"],
+  "capitalUsd": 1000,
+  "maxOrderUsd": 300,
+  "entryDelaySec": 30,
+  "entryWindowSec": 600,
+  "exitMinutesBeforeClose": 5,
+  "pollSec": 60,
+  "dataFeed": "iex",
+  "dryRun": false,
+  "strategy": { "rsiMax": 10, "ibsMax": 0.2, "minSignals": 2, "maxPos": 4, "stopAtr": 0, "costBps": 5 }
+}

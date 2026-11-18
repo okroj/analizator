@@ -1,0 +1,12 @@
+# Jedna sesja bota. Dostosuj User i WorkingDirectory do swojego serwera.
+[Unit]
+Description=Daybot: sesja dzienna
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=daybot
+WorkingDirectory=/opt/daybot
+ExecStart=/usr/bin/node bot.js run
+TimeoutStartSec=12h
